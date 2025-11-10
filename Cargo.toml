@@ -1,0 +1,18 @@
+[package]
+name = "auto_video_organize"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 互動式介面
+dialoguer = "0.12.0"
+console = "0.16.1"
+# 錯誤處理
+anyhow = "1.0"
+
+env_logger = "0.11"
+log = "0.4"
+
+# 序列化/配置
+serde_json = "1.0"
+
