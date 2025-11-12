@@ -15,4 +15,8 @@ log = "0.4"
 
 # 序列化/配置
 serde_json = "1.0"
+rayon = "1.11.0"
+walkdir = "2.5.0"
+blake3 = "1.8.2"
+entry = "0.2.1"
 
