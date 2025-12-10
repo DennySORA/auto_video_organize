@@ -8,7 +8,7 @@ pub struct CpuMonitor {
 }
 
 impl CpuMonitor {
-    #[must_use] 
+    #[must_use]
     pub fn new(usage_threshold: f32) -> Self {
         let mut system = System::new_all();
         system.refresh_cpu_all();

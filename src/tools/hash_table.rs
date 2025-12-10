@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for HashTable {
 }
 
 impl HashTable {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -84,13 +84,13 @@ impl HashTable {
     }
 
     /// 檢查是否存在相同大小的檔案
-    #[must_use] 
+    #[must_use]
     pub fn has_size(&self, size: u64) -> bool {
         self.entries.contains_key(&size)
     }
 
     /// 檢查特定大小下是否有特定 hash
-    #[must_use] 
+    #[must_use]
     pub fn contains_hash(&self, size: u64, hash: &str) -> bool {
         self.entries
             .get(&size)
@@ -103,7 +103,7 @@ impl HashTable {
     }
 
     #[cfg(test)]
-    #[must_use] 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

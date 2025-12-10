@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[must_use] 
+#[must_use]
 pub fn setup_shutdown_signal() -> Arc<AtomicBool> {
     let shutdown_signal = Arc::new(AtomicBool::new(false));
     let signal_clone = Arc::clone(&shutdown_signal);

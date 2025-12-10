@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use auto_video_organize::config::{Config, FileCategory};
 use auto_video_organize::tools::{
     DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_THUMBNAIL_COUNT, DuplicationDetector,
-    create_contact_sheet, create_thumbnail_tasks, detect_scenes, ensure_directory_exists,
-    extract_thumbnails_parallel, get_video_info, scan_all_files, select_timestamps,
+    FileCategorizer, OrphanFileMover, create_contact_sheet, create_thumbnail_tasks, detect_scenes,
+    ensure_directory_exists, extract_thumbnails_parallel, get_video_info, scan_all_files,
+    select_timestamps,
 };
 
 /// 測試 Duplication Checker 功能
@@ -215,4 +217,240 @@ fn test_scan_all_files_e2e() {
     assert!(extensions.contains(&"mp4".to_string()), "應該包含 mp4 檔案");
 
     println!("✓ 檔案掃描 E2E 測試通過");
+}
+
+/// 測試自動依類型整理檔案功能
+#[test]
+fn test_auto_move_by_type_e2e() {
+    // 使用獨立的測試目錄
+    let test_dir = Path::new("/tmp/e2e_test/auto_move_test");
+
+    // 清理並重建測試目錄
+    if test_dir.exists() {
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+    fs::create_dir_all(test_dir).unwrap();
+
+    // 建立不同類型的測試檔案
+    fs::write(test_dir.join("movie.mp4"), "video content").unwrap();
+    fs::write(test_dir.join("song.mp3"), "audio content").unwrap();
+    fs::write(test_dir.join("photo.jpg"), "image content").unwrap();
+    fs::write(test_dir.join("document.txt"), "text content").unwrap();
+    fs::write(test_dir.join("archive.zip"), "archive content").unwrap();
+    fs::write(test_dir.join("code.rs"), "fn main() {}").unwrap();
+    fs::write(test_dir.join("unknown.xyz"), "unknown content").unwrap();
+
+    println!("=== 測試檔案分類器 ===");
+
+    let config = Config::new().expect("無法載入設定");
+    let shutdown_signal = Arc::new(AtomicBool::new(false));
+    let categorizer = FileCategorizer::new(config.file_type_table, shutdown_signal);
+
+    // 掃描並分類
+    let files = categorizer.scan_and_categorize(test_dir).unwrap();
+    println!("掃描到 {} 個檔案", files.len());
+    assert_eq!(files.len(), 7, "應該有 7 個檔案");
+
+    // 驗證分類
+    let video_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Video)
+        .count();
+    let audio_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Audio)
+        .count();
+    let image_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Image)
+        .count();
+    let document_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Document)
+        .count();
+    let archive_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Archive)
+        .count();
+    let code_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Code)
+        .count();
+    let other_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Other)
+        .count();
+
+    println!("  Video: {}", video_count);
+    println!("  Audio: {}", audio_count);
+    println!("  Image: {}", image_count);
+    println!("  Document: {}", document_count);
+    println!("  Archive: {}", archive_count);
+    println!("  Code: {}", code_count);
+    println!("  Other: {}", other_count);
+
+    assert_eq!(video_count, 1, "應該有 1 個影片檔案");
+    assert_eq!(audio_count, 1, "應該有 1 個音訊檔案");
+    assert_eq!(image_count, 1, "應該有 1 個圖片檔案");
+    assert_eq!(document_count, 1, "應該有 1 個文件檔案");
+    assert_eq!(archive_count, 1, "應該有 1 個壓縮檔案");
+    assert_eq!(code_count, 1, "應該有 1 個程式碼檔案");
+    assert_eq!(other_count, 1, "應該有 1 個其他檔案");
+
+    // 移動檔案
+    println!("\n=== 移動檔案到分類資料夾 ===");
+    let result = categorizer
+        .move_files_to_categories(&files, test_dir)
+        .unwrap();
+
+    println!("  移動: {} 個", result.files_moved);
+    println!("  失敗: {} 個", result.errors);
+    assert_eq!(result.files_moved, 7, "應該移動 7 個檔案");
+    assert_eq!(result.errors, 0, "不應該有錯誤");
+
+    // 驗證檔案已移動到正確的資料夾
+    assert!(
+        test_dir.join("video/movie.mp4").exists(),
+        "movie.mp4 應該在 video 資料夾"
+    );
+    assert!(
+        test_dir.join("audio/song.mp3").exists(),
+        "song.mp3 應該在 audio 資料夾"
+    );
+    assert!(
+        test_dir.join("image/photo.jpg").exists(),
+        "photo.jpg 應該在 image 資料夾"
+    );
+    assert!(
+        test_dir.join("document/document.txt").exists(),
+        "document.txt 應該在 document 資料夾"
+    );
+    assert!(
+        test_dir.join("archive/archive.zip").exists(),
+        "archive.zip 應該在 archive 資料夾"
+    );
+    assert!(
+        test_dir.join("code/code.rs").exists(),
+        "code.rs 應該在 code 資料夾"
+    );
+    assert!(
+        test_dir.join("other/unknown.xyz").exists(),
+        "unknown.xyz 應該在 other 資料夾"
+    );
+
+    // 驗證原始檔案已不存在
+    assert!(
+        !test_dir.join("movie.mp4").exists(),
+        "原始 movie.mp4 應該已不存在"
+    );
+    assert!(
+        !test_dir.join("song.mp3").exists(),
+        "原始 song.mp3 應該已不存在"
+    );
+
+    println!("\n✓ 自動依類型整理檔案 E2E 測試通過");
+}
+
+/// 測試孤立檔案移動功能
+#[test]
+fn test_orphan_file_mover_e2e() {
+    // 使用獨立的測試目錄
+    let test_dir = Path::new("/tmp/e2e_test/orphan_file_test");
+
+    // 清理並重建測試目錄
+    if test_dir.exists() {
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+    fs::create_dir_all(test_dir).unwrap();
+
+    // 建立測試檔案
+    // 有對應檔案的組（應保留）
+    fs::write(test_dir.join("video1.mp4"), "video content 1").unwrap();
+    fs::write(test_dir.join("video1.jpg"), "thumbnail 1").unwrap();
+
+    fs::write(test_dir.join("video2.mp4"), "video content 2").unwrap();
+    fs::write(test_dir.join("video2.jpg"), "thumbnail 2").unwrap();
+    fs::write(test_dir.join("video2.srt"), "subtitle 2").unwrap();
+
+    // 孤立檔案（應移動）
+    fs::write(test_dir.join("orphan1.txt"), "orphan text").unwrap();
+    fs::write(test_dir.join("orphan2.doc"), "orphan doc").unwrap();
+    fs::write(test_dir.join("alone.mp3"), "alone audio").unwrap();
+
+    println!("=== 測試孤立檔案移動器 ===");
+
+    let shutdown_signal = Arc::new(AtomicBool::new(false));
+    let mover = OrphanFileMover::new(shutdown_signal);
+
+    // 掃描並分組
+    let groups = mover.scan_and_group(test_dir).unwrap();
+    println!("找到 {} 個群組", groups.len());
+    assert_eq!(
+        groups.len(),
+        5,
+        "應該有 5 個群組 (video1, video2, orphan1, orphan2, alone)"
+    );
+
+    // 取得孤立檔案列表
+    let orphan_files = OrphanFileMover::get_orphan_files(&groups);
+    println!("孤立檔案: {} 個", orphan_files.len());
+    assert_eq!(orphan_files.len(), 3, "應該有 3 個孤立檔案");
+
+    // 取得有對應的群組
+    let paired_groups = OrphanFileMover::get_paired_groups(&groups);
+    println!("有對應的群組: {} 個", paired_groups.len());
+    assert_eq!(paired_groups.len(), 2, "應該有 2 個有對應的群組");
+
+    // 移動孤立檔案
+    println!("\n=== 移動孤立檔案 ===");
+    let result = mover.move_orphan_files(&groups, test_dir).unwrap();
+
+    println!("  總檔案: {}", result.total_files);
+    println!("  有對應（保留）: {}", result.files_with_pairs);
+    println!("  孤立（已移動）: {}", result.orphan_files_moved);
+    println!("  錯誤: {}", result.errors);
+
+    assert_eq!(result.total_files, 8, "應該有 8 個檔案");
+    assert_eq!(result.files_with_pairs, 5, "應該有 5 個有對應的檔案");
+    assert_eq!(result.orphan_files_moved, 3, "應該移動 3 個孤立檔案");
+    assert_eq!(result.errors, 0, "不應該有錯誤");
+
+    // 驗證有對應的檔案仍在原位置
+    assert!(test_dir.join("video1.mp4").exists(), "video1.mp4 應該保留");
+    assert!(test_dir.join("video1.jpg").exists(), "video1.jpg 應該保留");
+    assert!(test_dir.join("video2.mp4").exists(), "video2.mp4 應該保留");
+    assert!(test_dir.join("video2.jpg").exists(), "video2.jpg 應該保留");
+    assert!(test_dir.join("video2.srt").exists(), "video2.srt 應該保留");
+
+    // 驗證孤立檔案已移動
+    assert!(
+        !test_dir.join("orphan1.txt").exists(),
+        "orphan1.txt 應該已被移動"
+    );
+    assert!(
+        !test_dir.join("orphan2.doc").exists(),
+        "orphan2.doc 應該已被移動"
+    );
+    assert!(
+        !test_dir.join("alone.mp3").exists(),
+        "alone.mp3 應該已被移動"
+    );
+
+    // 驗證孤立檔案在目標目錄
+    let orphan_dir = test_dir.join("orphan_files");
+    assert!(orphan_dir.exists(), "孤立檔案目錄應該存在");
+    assert!(
+        orphan_dir.join("orphan1.txt").exists(),
+        "orphan1.txt 應該在 orphan_files 目錄"
+    );
+    assert!(
+        orphan_dir.join("orphan2.doc").exists(),
+        "orphan2.doc 應該在 orphan_files 目錄"
+    );
+    assert!(
+        orphan_dir.join("alone.mp3").exists(),
+        "alone.mp3 應該在 orphan_files 目錄"
+    );
+
+    println!("\n✓ 孤立檔案移動 E2E 測試通過");
 }

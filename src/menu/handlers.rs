@@ -1,4 +1,6 @@
-use crate::component::{ContactSheetGenerator, DuplicationChecker, VideoEncoder};
+use crate::component::{
+    AutoMoveByType, ContactSheetGenerator, DuplicationChecker, OrphanFileMover, VideoEncoder,
+};
 use crate::config::Config;
 use crate::pause;
 use anyhow::Result;
@@ -34,6 +36,29 @@ pub fn run_contact_sheet_generator(term: &Term, shutdown_signal: &Arc<AtomicBool
     let generator = ContactSheetGenerator::new(config, Arc::clone(shutdown_signal));
 
     if let Err(e) = generator.run() {
+        eprintln!("{} {}", style("錯誤:").red().bold(), e);
+    }
+
+    pause(term)?;
+    Ok(())
+}
+
+pub fn run_auto_move_by_type(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
+    let config = Config::new()?;
+    let mover = AutoMoveByType::new(config, Arc::clone(shutdown_signal));
+
+    if let Err(e) = mover.run() {
+        eprintln!("{} {}", style("錯誤:").red().bold(), e);
+    }
+
+    pause(term)?;
+    Ok(())
+}
+
+pub fn run_orphan_file_mover(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
+    let mover = OrphanFileMover::new(Arc::clone(shutdown_signal));
+
+    if let Err(e) = mover.run() {
         eprintln!("{} {}", style("錯誤:").red().bold(), e);
     }
 
