@@ -7,7 +7,7 @@ use crate::tools::SceneChange;
 /// 2. 如果片段數量 >= count：均勻選取 count 個片段
 /// 3. 如果片段數量 < count：對最長的片段進行二分切割直到達到 count
 /// 4. 每個片段選取 35% 處作為代表時間點（避開轉場邊界）
-#[must_use] 
+#[must_use]
 pub fn select_timestamps(duration: f64, scene_changes: &[SceneChange], count: usize) -> Vec<f64> {
     if count == 0 || duration <= 0.0 {
         return Vec::new();

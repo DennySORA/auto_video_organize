@@ -7,7 +7,7 @@ pub struct FfmpegCommand {
 }
 
 impl FfmpegCommand {
-    #[must_use] 
+    #[must_use]
     pub fn new(source_path: &Path) -> Self {
         let destination_path = Self::generate_destination_path(source_path);
         Self {
@@ -25,12 +25,12 @@ impl FfmpegCommand {
         parent.join(format!("{file_stem}.convert.mkv"))
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn destination_path(&self) -> &Path {
         &self.destination_path
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn build_command(&self) -> Command {
         let mut cmd = Command::new("ffmpeg");
 

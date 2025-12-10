@@ -157,7 +157,7 @@ pub fn extract_thumbnails_parallel(
 }
 
 /// 建立縮圖任務列表
-#[must_use] 
+#[must_use]
 pub fn create_thumbnail_tasks(
     video_path: &Path,
     timestamps: &[f64],

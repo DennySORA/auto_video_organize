@@ -27,7 +27,7 @@ pub struct EncodingTask {
 }
 
 impl EncodingTask {
-    #[must_use] 
+    #[must_use]
     pub fn new(video_info: &VideoFileInfo) -> Self {
         let ffmpeg_cmd = FfmpegCommand::new(&video_info.path);
         Self {
@@ -293,7 +293,7 @@ impl TaskScheduler {
         );
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn tasks(&self) -> &[EncodingTask] {
         &self.tasks
     }

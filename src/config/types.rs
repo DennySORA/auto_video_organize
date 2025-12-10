@@ -2,6 +2,97 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
+/// 檔案類型分類
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileCategory {
+    Video,
+    Audio,
+    Image,
+    Archive,
+    Document,
+    Spreadsheet,
+    Presentation,
+    Ebook,
+    Code,
+    Markup,
+    Database,
+    Executable,
+    Font,
+    Cad3D,
+    System,
+    Other,
+}
+
+impl FileCategory {
+    /// 取得分類的資料夾名稱
+    #[must_use]
+    pub const fn folder_name(&self) -> &'static str {
+        match self {
+            Self::Video => "video",
+            Self::Audio => "audio",
+            Self::Image => "image",
+            Self::Archive => "archive",
+            Self::Document => "document",
+            Self::Spreadsheet => "spreadsheet",
+            Self::Presentation => "presentation",
+            Self::Ebook => "ebook",
+            Self::Code => "code",
+            Self::Markup => "markup",
+            Self::Database => "database",
+            Self::Executable => "executable",
+            Self::Font => "font",
+            Self::Cad3D => "cad_3d",
+            Self::System => "system",
+            Self::Other => "other",
+        }
+    }
+
+    /// 取得分類的顯示名稱
+    #[must_use]
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Video => "影片",
+            Self::Audio => "音訊",
+            Self::Image => "圖片",
+            Self::Archive => "壓縮檔",
+            Self::Document => "文件",
+            Self::Spreadsheet => "試算表",
+            Self::Presentation => "簡報",
+            Self::Ebook => "電子書",
+            Self::Code => "程式碼",
+            Self::Markup => "標記語言",
+            Self::Database => "資料庫",
+            Self::Executable => "執行檔",
+            Self::Font => "字型",
+            Self::Cad3D => "CAD/3D",
+            Self::System => "系統檔",
+            Self::Other => "其他",
+        }
+    }
+
+    /// 取得所有分類（不含 Other）
+    #[must_use]
+    pub const fn all_categories() -> &'static [Self] {
+        &[
+            Self::Video,
+            Self::Audio,
+            Self::Image,
+            Self::Archive,
+            Self::Document,
+            Self::Spreadsheet,
+            Self::Presentation,
+            Self::Ebook,
+            Self::Code,
+            Self::Markup,
+            Self::Database,
+            Self::Executable,
+            Self::Font,
+            Self::Cad3D,
+            Self::System,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileTypeTable {
     #[serde(rename = "VIDEO_FILE")]
@@ -37,24 +128,131 @@ pub struct FileTypeTable {
 }
 
 impl FileTypeTable {
-    #[must_use] 
-    pub fn video_extensions_set(&self) -> HashSet<String> {
-        self.video_file
-            .iter()
-            .map(|ext| ext.to_lowercase())
-            .collect()
+    /// 取得指定分類的副檔名集合
+    #[must_use]
+    pub fn extensions_for_category(&self, category: FileCategory) -> HashSet<String> {
+        let extensions = match category {
+            FileCategory::Video => &self.video_file,
+            FileCategory::Audio => &self.audio_file,
+            FileCategory::Image => &self.image_file,
+            FileCategory::Archive => &self.archive_file,
+            FileCategory::Document => &self.document_file,
+            FileCategory::Spreadsheet => &self.spreadsheet_file,
+            FileCategory::Presentation => &self.presentation_file,
+            FileCategory::Ebook => &self.ebook_file,
+            FileCategory::Code => &self.code_file,
+            FileCategory::Markup => &self.markup_language_file,
+            FileCategory::Database => &self.database_file,
+            FileCategory::Executable => &self.executable_file,
+            FileCategory::Font => &self.font_file,
+            FileCategory::Cad3D => &self.cad_3d_file,
+            FileCategory::System => &self.system_file,
+            FileCategory::Other => return HashSet::new(),
+        };
+        extensions.iter().map(|ext| ext.to_lowercase()).collect()
     }
 
-    #[must_use] 
+    /// 判斷檔案屬於哪個分類
+    #[must_use]
+    pub fn categorize_file(&self, path: &Path) -> FileCategory {
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) => format!(".{}", e.to_lowercase()),
+            None => return FileCategory::Other,
+        };
+
+        // 按優先順序檢查各分類
+        for &category in FileCategory::all_categories() {
+            if self.extensions_for_category(category).contains(&ext) {
+                return category;
+            }
+        }
+
+        FileCategory::Other
+    }
+
+    #[must_use]
+    pub fn video_extensions_set(&self) -> HashSet<String> {
+        self.extensions_for_category(FileCategory::Video)
+    }
+
+    #[must_use]
     pub fn is_video_file(&self, path: &Path) -> bool {
-        let video_extensions = self.video_extensions_set();
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| video_extensions.contains(&format!(".{}", ext.to_lowercase())))
+        self.categorize_file(path) == FileCategory::Video
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub file_type_table: FileTypeTable,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_file_type_table() -> FileTypeTable {
+        FileTypeTable {
+            video_file: vec![".mp4".to_string(), ".mkv".to_string()],
+            audio_file: vec![".mp3".to_string(), ".flac".to_string()],
+            image_file: vec![".jpg".to_string(), ".png".to_string()],
+            archive_file: vec![".zip".to_string(), ".rar".to_string()],
+            document_file: vec![".doc".to_string(), ".txt".to_string()],
+            spreadsheet_file: vec![".xls".to_string(), ".csv".to_string()],
+            presentation_file: vec![".ppt".to_string()],
+            ebook_file: vec![".epub".to_string()],
+            code_file: vec![".rs".to_string(), ".py".to_string()],
+            markup_language_file: vec![".html".to_string(), ".json".to_string()],
+            database_file: vec![".db".to_string(), ".sqlite".to_string()],
+            executable_file: vec![".exe".to_string()],
+            font_file: vec![".ttf".to_string()],
+            cad_3d_file: vec![".obj".to_string()],
+            system_file: vec![".dll".to_string()],
+        }
+    }
+
+    #[test]
+    fn test_categorize_video_file() {
+        let table = create_test_file_type_table();
+        assert_eq!(
+            table.categorize_file(Path::new("movie.mp4")),
+            FileCategory::Video
+        );
+        assert_eq!(
+            table.categorize_file(Path::new("movie.MKV")),
+            FileCategory::Video
+        );
+    }
+
+    #[test]
+    fn test_categorize_image_file() {
+        let table = create_test_file_type_table();
+        assert_eq!(
+            table.categorize_file(Path::new("photo.jpg")),
+            FileCategory::Image
+        );
+        assert_eq!(
+            table.categorize_file(Path::new("photo.PNG")),
+            FileCategory::Image
+        );
+    }
+
+    #[test]
+    fn test_categorize_other_file() {
+        let table = create_test_file_type_table();
+        assert_eq!(
+            table.categorize_file(Path::new("unknown.xyz")),
+            FileCategory::Other
+        );
+        assert_eq!(
+            table.categorize_file(Path::new("noextension")),
+            FileCategory::Other
+        );
+    }
+
+    #[test]
+    fn test_folder_name() {
+        assert_eq!(FileCategory::Video.folder_name(), "video");
+        assert_eq!(FileCategory::Image.folder_name(), "image");
+        assert_eq!(FileCategory::Other.folder_name(), "other");
+    }
 }
