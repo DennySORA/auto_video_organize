@@ -35,6 +35,7 @@ impl Default for SceneDetectorConfig {
 
 impl SceneDetectorConfig {
     /// 根據影片長度自動調整參數
+    #[must_use] 
     pub fn auto_adjust(video_info: &VideoInfo) -> Self {
         let duration = video_info.duration_seconds;
 
