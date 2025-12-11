@@ -7,13 +7,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use auto_video_organize::config::{Config, FileCategory};
-use auto_video_organize::tools::{
-    DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_THUMBNAIL_COUNT, DuplicationDetector,
-    FileCategorizer, OrphanFileMover, create_contact_sheet, create_thumbnail_tasks, detect_scenes,
-    ensure_directory_exists, extract_thumbnails_parallel, get_video_info, scan_all_files,
-    select_timestamps,
+use auto_video_organize::component::auto_move_by_type::FileCategorizer;
+use auto_video_organize::component::contact_sheet_generator::{
+    DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_THUMBNAIL_COUNT, create_contact_sheet,
+    create_thumbnail_tasks, detect_scenes, extract_thumbnails_parallel, select_timestamps,
 };
+use auto_video_organize::component::duplication_checker::DuplicationDetector;
+use auto_video_organize::component::orphan_file_mover::FileGrouper;
+use auto_video_organize::config::{Config, FileCategory};
+use auto_video_organize::tools::{ensure_directory_exists, get_video_info, scan_all_files};
 
 /// 測試 Duplication Checker 功能
 #[test]
@@ -281,13 +283,13 @@ fn test_auto_move_by_type_e2e() {
         .filter(|f| f.category == FileCategory::Other)
         .count();
 
-    println!("  Video: {}", video_count);
-    println!("  Audio: {}", audio_count);
-    println!("  Image: {}", image_count);
-    println!("  Document: {}", document_count);
-    println!("  Archive: {}", archive_count);
-    println!("  Code: {}", code_count);
-    println!("  Other: {}", other_count);
+    println!("  Video: {video_count}");
+    println!("  Audio: {audio_count}");
+    println!("  Image: {image_count}");
+    println!("  Document: {document_count}");
+    println!("  Archive: {archive_count}");
+    println!("  Code: {code_count}");
+    println!("  Other: {other_count}");
 
     assert_eq!(video_count, 1, "應該有 1 個影片檔案");
     assert_eq!(audio_count, 1, "應該有 1 個音訊檔案");
@@ -380,10 +382,10 @@ fn test_orphan_file_mover_e2e() {
     println!("=== 測試孤立檔案移動器 ===");
 
     let shutdown_signal = Arc::new(AtomicBool::new(false));
-    let mover = OrphanFileMover::new(shutdown_signal);
+    let grouper = FileGrouper::new(shutdown_signal);
 
     // 掃描並分組
-    let groups = mover.scan_and_group(test_dir).unwrap();
+    let groups = grouper.scan_and_group(test_dir).unwrap();
     println!("找到 {} 個群組", groups.len());
     assert_eq!(
         groups.len(),
@@ -392,18 +394,18 @@ fn test_orphan_file_mover_e2e() {
     );
 
     // 取得孤立檔案列表
-    let orphan_files = OrphanFileMover::get_orphan_files(&groups);
+    let orphan_files = FileGrouper::get_orphan_files(&groups);
     println!("孤立檔案: {} 個", orphan_files.len());
     assert_eq!(orphan_files.len(), 3, "應該有 3 個孤立檔案");
 
     // 取得有對應的群組
-    let paired_groups = OrphanFileMover::get_paired_groups(&groups);
+    let paired_groups = FileGrouper::get_paired_groups(&groups);
     println!("有對應的群組: {} 個", paired_groups.len());
     assert_eq!(paired_groups.len(), 2, "應該有 2 個有對應的群組");
 
     // 移動孤立檔案
     println!("\n=== 移動孤立檔案 ===");
-    let result = mover.move_orphan_files(&groups, test_dir).unwrap();
+    let result = grouper.move_orphan_files(&groups, test_dir).unwrap();
 
     println!("  總檔案: {}", result.total_files);
     println!("  有對應（保留）: {}", result.files_with_pairs);
