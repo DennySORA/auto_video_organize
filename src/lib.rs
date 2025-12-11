@@ -1,7 +1,3 @@
-//! Auto Video Organize Library
-//!
-//! 提供影片整理、去重和預覽圖生成功能
-
 pub mod component;
 pub mod config;
 pub mod init;
