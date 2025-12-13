@@ -12,11 +12,28 @@ use crate::tools::{
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::Input;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
+use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 預覽圖預設輸出子目錄名稱
+const CONTACT_SHEET_OUTPUT_DIR: &str = "_contact_sheets";
+
+/// 產生唯一 ID（結合時間戳與執行緒 ID）
+fn generate_unique_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let thread_id = std::thread::current().id();
+    format!("{timestamp:x}_{thread_id:?}")
+        .replace("ThreadId(", "")
+        .replace(")", "")
+}
 
 /// 預覽圖生成結果
 #[derive(Debug)]
@@ -56,10 +73,11 @@ impl ContactSheetGenerator {
         let input_dir = PathBuf::from(&input_path);
         validate_directory_exists(&input_dir)?;
 
-        // 取得輸出路徑
-        let output_path = self.prompt_output_path()?;
-        let output_dir = PathBuf::from(&output_path);
+        // 輸出路徑固定為影片目錄下的子目錄
+        let output_dir = input_dir.join(CONTACT_SHEET_OUTPUT_DIR);
         ensure_directory_exists(&output_dir)?;
+
+        println!("預覽圖將輸出至: {}", style(output_dir.display()).cyan());
 
         // 掃描影片檔案
         println!("{}", style("掃描影片檔案中...").dim());
@@ -91,10 +109,17 @@ impl ContactSheetGenerator {
         }
 
         println!();
-        println!("{}", style("開始生成預覽圖...").cyan());
+        println!(
+            "{}",
+            style(format!(
+                "開始平行生成預覽圖（使用 {} 個執行緒）...",
+                rayon::current_num_threads()
+            ))
+            .cyan()
+        );
 
-        // 處理每個影片
-        let result = self.process_videos(&video_files, &output_dir)?;
+        // 平行處理所有影片
+        let result = self.process_videos_parallel(&video_files, &output_dir);
 
         self.print_summary(&result);
 
@@ -108,80 +133,71 @@ impl ContactSheetGenerator {
         Ok(path.trim().to_string())
     }
 
-    fn prompt_output_path(&self) -> Result<String> {
-        let path: String = Input::new()
-            .with_prompt("請輸入預覽圖輸出資料夾路徑")
-            .interact_text()?;
-        Ok(path.trim().to_string())
-    }
-
-    fn process_videos(
+    /// 平行處理所有影片，吃滿 CPU
+    fn process_videos_parallel(
         &self,
         videos: &[VideoFileInfo],
         output_dir: &Path,
-    ) -> Result<GenerationResult> {
-        let mut successful = 0;
-        let mut failed = 0;
-        let mut skipped = 0;
+    ) -> GenerationResult {
+        let successful = AtomicUsize::new(0);
+        let failed = AtomicUsize::new(0);
+        let skipped = AtomicUsize::new(0);
+        let processed = AtomicUsize::new(0);
+        let total = videos.len();
 
-        for (index, video) in videos.iter().enumerate() {
+        videos.par_iter().for_each(|video| {
             if self.shutdown_signal.load(Ordering::SeqCst) {
-                warn!("收到中斷訊號，停止處理");
-                break;
+                return;
             }
 
+            let current = processed.fetch_add(1, Ordering::SeqCst) + 1;
+
             let video_name = video.path.file_stem().map_or_else(
-                || format!("video_{index}"),
+                || "unknown".to_string(),
                 |s| s.to_string_lossy().to_string(),
             );
 
-            println!(
-                "\n{} [{}/{}] {}",
-                style("處理中").cyan(),
-                index + 1,
-                videos.len(),
-                style(&video_name).bold()
-            );
+            debug!("[{current}/{total}] 開始處理: {video_name}");
 
             // 檢查輸出檔案是否已存在
             let output_path = output_dir.join(format!("{video_name}_contact_sheet.jpg"));
             if output_path.exists() {
-                println!("  {} 預覽圖已存在，跳過", style("⤳").dim());
-                skipped += 1;
-                continue;
+                info!("[{current}/{total}] {video_name}: 預覽圖已存在，跳過");
+                skipped.fetch_add(1, Ordering::SeqCst);
+                return;
             }
 
             match self.process_single_video(&video.path, &output_path) {
                 Ok(()) => {
-                    println!("  {} 預覽圖已建立", style("✓").green());
-                    successful += 1;
+                    info!("[{current}/{total}] {video_name}: 預覽圖已建立");
+                    successful.fetch_add(1, Ordering::SeqCst);
                 }
                 Err(e) => {
-                    error!("處理影片失敗 {video_name}: {e}");
-                    println!("  {} 處理失敗: {}", style("✗").red(), e);
-                    failed += 1;
+                    error!("[{current}/{total}] {video_name}: 處理失敗 - {e}");
+                    failed.fetch_add(1, Ordering::SeqCst);
                 }
             }
-        }
+        });
 
-        Ok(GenerationResult {
-            total_videos: videos.len(),
-            successful,
-            failed,
-            skipped,
-        })
+        GenerationResult {
+            total_videos: total,
+            successful: successful.load(Ordering::SeqCst),
+            failed: failed.load(Ordering::SeqCst),
+            skipped: skipped.load(Ordering::SeqCst),
+        }
     }
 
     fn process_single_video(&self, video_path: &Path, output_path: &Path) -> Result<()> {
-        // 建立暫存目錄
+        // 建立暫存目錄（使用唯一 ID 避免平行處理時衝突）
         let video_stem = video_path
             .file_stem()
             .map_or_else(|| "video".to_string(), |s| s.to_string_lossy().to_string());
 
+        let unique_id = generate_unique_id();
         let temp_dir = output_path
             .parent()
             .unwrap_or(Path::new("."))
-            .join(format!(".tmp_{video_stem}"));
+            .join(format!(".tmp_{video_stem}_{unique_id}"));
 
         ensure_directory_exists(&temp_dir)?;
 
@@ -202,12 +218,17 @@ impl ContactSheetGenerator {
         output_path: &Path,
         temp_dir: &Path,
     ) -> Result<()> {
+        let video_name = video_path.file_name().map_or_else(
+            || "unknown".to_string(),
+            |s| s.to_string_lossy().to_string(),
+        );
+
         // Stage A: 取得影片資訊
-        print!("  {} 讀取影片資訊...", style("A").dim());
+        debug!("{video_name}: 讀取影片資訊...");
         let video_info = get_video_info(video_path)
             .with_context(|| format!("無法讀取影片資訊: {}", video_path.display()))?;
-        println!(
-            " {:.1}s, {}x{}",
+        debug!(
+            "{video_name}: {:.1}s, {}x{}",
             video_info.duration_seconds, video_info.width, video_info.height
         );
 
@@ -217,19 +238,19 @@ impl ContactSheetGenerator {
         }
 
         // Stage B: 場景變換偵測
-        print!("  {} 偵測場景變換...", style("B").dim());
+        debug!("{video_name}: 偵測場景變換...");
         let scenes =
             detect_scenes(video_path, &video_info, None).with_context(|| "場景偵測失敗")?;
-        println!(" 找到 {} 個場景變換點", scenes.len());
+        debug!("{video_name}: 找到 {} 個場景變換點", scenes.len());
 
         // Stage C: 選取時間點
-        print!("  {} 選取截圖時間點...", style("C").dim());
+        debug!("{video_name}: 選取截圖時間點...");
         let timestamps = select_timestamps(
             video_info.duration_seconds,
             &scenes,
             DEFAULT_THUMBNAIL_COUNT,
         );
-        println!(" 選取 {} 個時間點", timestamps.len());
+        debug!("{video_name}: 選取 {} 個時間點", timestamps.len());
 
         if timestamps.len() < DEFAULT_THUMBNAIL_COUNT {
             anyhow::bail!(
@@ -239,14 +260,14 @@ impl ContactSheetGenerator {
             );
         }
 
-        // Stage D: 平行擷取縮圖
-        print!("  {} 擷取縮圖...", style("D").dim());
+        // Stage D: 擷取縮圖（此階段內部已平行化）
+        debug!("{video_name}: 擷取縮圖...");
         let tasks = create_thumbnail_tasks(video_path, &timestamps, temp_dir);
         let results = extract_thumbnails_parallel(tasks, &self.shutdown_signal);
 
         let success_count = results.iter().filter(|r| r.success).count();
         let failed_count = results.len() - success_count;
-        println!(" 成功 {success_count}, 失敗 {failed_count}");
+        debug!("{video_name}: 縮圖擷取完成 - 成功 {success_count}, 失敗 {failed_count}");
 
         if success_count < DEFAULT_THUMBNAIL_COUNT {
             anyhow::bail!(
@@ -255,7 +276,7 @@ impl ContactSheetGenerator {
         }
 
         // Stage E: 合併預覽圖
-        print!("  {} 合併預覽圖...", style("E").dim());
+        debug!("{video_name}: 合併預覽圖...");
 
         // 收集成功的縮圖路徑（按索引排序）
         let mut thumbnail_paths: Vec<_> = results
@@ -274,9 +295,7 @@ impl ContactSheetGenerator {
         )
         .with_context(|| "合併預覽圖失敗")?;
 
-        println!(" 完成");
-
-        info!("預覽圖已建立: {}", output_path.display());
+        debug!("{video_name}: 預覽圖生成完成");
 
         Ok(())
     }

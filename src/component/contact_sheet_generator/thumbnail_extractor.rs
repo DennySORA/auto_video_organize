@@ -36,7 +36,7 @@ pub struct ThumbnailResult {
 /// 兩段式 seek：
 /// 1. `-ss` 在 `-i` 前：快速跳轉到最近的關鍵幀
 /// 2. `-ss` 在 `-i` 後：精準解碼到目標時間點
-#[must_use] 
+#[must_use]
 pub fn extract_thumbnail(task: &ThumbnailTask) -> ThumbnailResult {
     let result = extract_thumbnail_inner(task);
 
