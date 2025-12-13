@@ -36,10 +36,7 @@ fn test_file_scanning() {
 
     // 驗證檔案按大小排序
     for i in 1..files.len() {
-        assert!(
-            files[i].size >= files[i - 1].size,
-            "檔案應該按大小升序排列"
-        );
+        assert!(files[i].size >= files[i - 1].size, "檔案應該按大小升序排列");
     }
 
     println!("✓ 檔案掃描測試通過");
@@ -188,13 +185,34 @@ fn test_file_categorization() {
     let files = categorizer.scan_and_categorize(input_dir).unwrap();
 
     // 統計各分類
-    let video_count = files.iter().filter(|f| f.category == FileCategory::Video).count();
-    let audio_count = files.iter().filter(|f| f.category == FileCategory::Audio).count();
-    let image_count = files.iter().filter(|f| f.category == FileCategory::Image).count();
-    let archive_count = files.iter().filter(|f| f.category == FileCategory::Archive).count();
-    let code_count = files.iter().filter(|f| f.category == FileCategory::Code).count();
-    let document_count = files.iter().filter(|f| f.category == FileCategory::Document).count();
-    let markup_count = files.iter().filter(|f| f.category == FileCategory::Markup).count();
+    let video_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Video)
+        .count();
+    let audio_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Audio)
+        .count();
+    let image_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Image)
+        .count();
+    let archive_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Archive)
+        .count();
+    let code_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Code)
+        .count();
+    let document_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Document)
+        .count();
+    let markup_count = files
+        .iter()
+        .filter(|f| f.category == FileCategory::Markup)
+        .count();
 
     println!("檔案分類結果:");
     println!("  影片: {video_count}");
@@ -286,7 +304,11 @@ fn test_duplication_detection() {
     assert_eq!(result1.duplicates_found, 0, "第一次不應該有重複");
 
     // 新增重複檔案
-    fs::write(test_dir.join("original_copy.txt"), "This is original content").unwrap();
+    fs::write(
+        test_dir.join("original_copy.txt"),
+        "This is original content",
+    )
+    .unwrap();
 
     // 第二次掃描 - 應該偵測到重複
     let mut detector2 =
