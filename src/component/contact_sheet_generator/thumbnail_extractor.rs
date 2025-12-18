@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
-use log::{debug, error};
+use log::{debug, error, warn};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 /// 縮圖尺寸設定
 pub const THUMBNAIL_WIDTH: u32 = 320;
@@ -12,6 +14,12 @@ pub const THUMBNAIL_HEIGHT: u32 = 180;
 
 /// 兩段式 seek 的前置緩衝時間（秒）
 const SEEK_MARGIN: f64 = 2.0;
+
+/// 重試次數
+const MAX_RETRIES: u32 = 3;
+
+/// 重試間隔（毫秒）
+const RETRY_DELAY_MS: u64 = 100;
 
 /// 縮圖擷取任務
 #[derive(Debug, Clone)]
@@ -31,29 +39,101 @@ pub struct ThumbnailResult {
     pub error_message: Option<String>,
 }
 
-/// 擷取單一縮圖（使用兩段式 seek 加速）
+/// 擷取單一縮圖（使用兩段式 seek 加速，含重試機制）
 ///
 /// 兩段式 seek：
 /// 1. `-ss` 在 `-i` 前：快速跳轉到最近的關鍵幀
 /// 2. `-ss` 在 `-i` 後：精準解碼到目標時間點
+///
+/// 若重試皆失敗，會產生全黑替代圖片
 #[must_use]
 pub fn extract_thumbnail(task: &ThumbnailTask) -> ThumbnailResult {
-    let result = extract_thumbnail_inner(task);
+    let mut last_error = None;
 
-    match result {
+    for attempt in 1..=MAX_RETRIES {
+        match extract_thumbnail_inner(task) {
+            Ok(()) => {
+                return ThumbnailResult {
+                    output_path: task.output_path.clone(),
+                    index: task.index,
+                    success: true,
+                    error_message: None,
+                };
+            }
+            Err(e) => {
+                last_error = Some(e.to_string());
+                if attempt < MAX_RETRIES {
+                    warn!(
+                        "縮圖擷取失敗 [{}] (嘗試 {}/{}): {}，重試中...",
+                        task.index,
+                        attempt,
+                        MAX_RETRIES,
+                        last_error.as_ref().unwrap()
+                    );
+                    thread::sleep(Duration::from_millis(RETRY_DELAY_MS * u64::from(attempt)));
+                }
+            }
+        }
+    }
+
+    // 所有重試都失敗，產生全黑替代圖片
+    warn!(
+        "縮圖擷取失敗 [{}]，產生全黑替代圖片: {}",
+        task.index,
+        last_error.as_deref().unwrap_or("未知錯誤")
+    );
+
+    match generate_black_placeholder(&task.output_path) {
         Ok(()) => ThumbnailResult {
             output_path: task.output_path.clone(),
             index: task.index,
-            success: true,
-            error_message: None,
+            success: true, // 使用替代圖片視為成功
+            error_message: Some("使用全黑替代圖片".to_string()),
         },
-        Err(e) => ThumbnailResult {
-            output_path: task.output_path.clone(),
-            index: task.index,
-            success: false,
-            error_message: Some(e.to_string()),
-        },
+        Err(e) => {
+            error!("產生替代圖片也失敗 [{}]: {}", task.index, e);
+            ThumbnailResult {
+                output_path: task.output_path.clone(),
+                index: task.index,
+                success: false,
+                error_message: Some(format!("擷取與替代皆失敗: {e}")),
+            }
+        }
     }
+}
+
+/// 產生全黑替代圖片
+fn generate_black_placeholder(output_path: &Path) -> Result<()> {
+    let output = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("color=c=black:s={THUMBNAIL_WIDTH}x{THUMBNAIL_HEIGHT}:d=1"),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            "-y",
+            &output_path.to_string_lossy(),
+        ])
+        .output()
+        .with_context(|| "無法執行 ffmpeg 產生替代圖片")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("ffmpeg 產生替代圖片失敗: {}", stderr.trim());
+    }
+
+    if !output_path.exists() {
+        anyhow::bail!("替代圖片未建立: {}", output_path.display());
+    }
+
+    debug!("已產生全黑替代圖片: {}", output_path.display());
+    Ok(())
 }
 
 fn extract_thumbnail_inner(task: &ThumbnailTask) -> Result<()> {

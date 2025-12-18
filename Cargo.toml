@@ -17,6 +17,7 @@ ctrlc = "3.5"
 blake3 = "1.8"
 rayon = "1.11"
 regex = "1.12"
+indicatif = "0.17"
 
 [dev-dependencies]
 tempfile = "3.23"

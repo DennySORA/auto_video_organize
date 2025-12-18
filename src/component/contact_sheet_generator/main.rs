@@ -12,16 +12,20 @@ use crate::tools::{
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::Input;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// 預覽圖預設輸出子目錄名稱
 const CONTACT_SHEET_OUTPUT_DIR: &str = "_contact_sheets";
+
+/// 處理階段數量（A-E 共 5 階段）
+const STAGE_COUNT: u64 = 5;
 
 /// 產生唯一 ID（結合時間戳與執行緒 ID）
 fn generate_unique_id() -> String {
@@ -33,6 +37,32 @@ fn generate_unique_id() -> String {
     format!("{timestamp:x}_{thread_id:?}")
         .replace("ThreadId(", "")
         .replace(")", "")
+}
+
+/// 建立總進度條樣式
+fn create_main_progress_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("{prefix:.bold.cyan} [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")
+        .unwrap()
+        .progress_chars("━━─")
+}
+
+/// 建立單一影片進度條樣式
+fn create_video_progress_style() -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template("  {spinner:.green} {prefix:.bold} [{bar:20.green/dim}] {msg}")
+        .unwrap()
+        .progress_chars("▓▒░")
+}
+
+/// 截斷名稱以適應顯示寬度
+fn truncate_name(name: &str, max_len: usize) -> String {
+    if name.chars().count() <= max_len {
+        format!("{name:<width$}", width = max_len)
+    } else {
+        let truncated: String = name.chars().take(max_len - 2).collect();
+        format!("{truncated}..")
+    }
 }
 
 /// 預覽圖生成結果
@@ -142,42 +172,80 @@ impl ContactSheetGenerator {
         let successful = AtomicUsize::new(0);
         let failed = AtomicUsize::new(0);
         let skipped = AtomicUsize::new(0);
-        let processed = AtomicUsize::new(0);
         let total = videos.len();
+
+        // 建立多重進度條容器
+        let multi_progress = MultiProgress::new();
+
+        // 總進度條（放在最上方）
+        let main_pb = multi_progress.add(ProgressBar::new(total as u64));
+        main_pb.set_style(create_main_progress_style());
+        main_pb.set_prefix("總進度");
+        main_pb.enable_steady_tick(Duration::from_millis(100));
+
+        // 分隔線
+        let separator = multi_progress.add(ProgressBar::new(0));
+        separator.set_style(
+            ProgressStyle::default_bar()
+                .template("─────────────────────────────────────────────────────────")
+                .unwrap(),
+        );
+        separator.tick();
 
         videos.par_iter().for_each(|video| {
             if self.shutdown_signal.load(Ordering::SeqCst) {
                 return;
             }
 
-            let current = processed.fetch_add(1, Ordering::SeqCst) + 1;
-
             let video_name = video.path.file_stem().map_or_else(
                 || "unknown".to_string(),
                 |s| s.to_string_lossy().to_string(),
             );
 
-            debug!("[{current}/{total}] 開始處理: {video_name}");
-
             // 檢查輸出檔案是否已存在
             let output_path = output_dir.join(format!("{video_name}_contact_sheet.jpg"));
             if output_path.exists() {
-                info!("[{current}/{total}] {video_name}: 預覽圖已存在，跳過");
+                info!("{video_name}: 預覽圖已存在，跳過");
                 skipped.fetch_add(1, Ordering::SeqCst);
+                main_pb.inc(1);
+                main_pb.set_message(format!("跳過: {video_name}"));
                 return;
             }
 
-            match self.process_single_video(&video.path, &output_path) {
+            // 為此影片建立進度條
+            let video_pb = multi_progress.add(ProgressBar::new(STAGE_COUNT));
+            video_pb.set_style(create_video_progress_style());
+            video_pb.set_prefix(truncate_name(&video_name, 20));
+            video_pb.enable_steady_tick(Duration::from_millis(80));
+
+            match self.process_single_video_with_progress(&video.path, &output_path, &video_pb) {
                 Ok(()) => {
-                    info!("[{current}/{total}] {video_name}: 預覽圖已建立");
+                    video_pb.set_message("✓ 完成");
+                    video_pb.finish();
+                    info!("{video_name}: 預覽圖已建立");
                     successful.fetch_add(1, Ordering::SeqCst);
                 }
                 Err(e) => {
-                    error!("[{current}/{total}] {video_name}: 處理失敗 - {e}");
+                    video_pb.set_message(format!("✗ {e}"));
+                    video_pb.abandon();
+                    error!("{video_name}: 處理失敗 - {e}");
                     failed.fetch_add(1, Ordering::SeqCst);
                 }
             }
+
+            main_pb.inc(1);
+            main_pb.set_message(format!(
+                "成功: {} / 失敗: {} / 跳過: {}",
+                successful.load(Ordering::SeqCst),
+                failed.load(Ordering::SeqCst),
+                skipped.load(Ordering::SeqCst)
+            ));
+
+            // 移除已完成的影片進度條
+            multi_progress.remove(&video_pb);
         });
+
+        main_pb.finish_with_message("處理完成");
 
         GenerationResult {
             total_videos: total,
@@ -187,7 +255,12 @@ impl ContactSheetGenerator {
         }
     }
 
-    fn process_single_video(&self, video_path: &Path, output_path: &Path) -> Result<()> {
+    fn process_single_video_with_progress(
+        &self,
+        video_path: &Path,
+        output_path: &Path,
+        progress: &ProgressBar,
+    ) -> Result<()> {
         // 建立暫存目錄（使用唯一 ID 避免平行處理時衝突）
         let video_stem = video_path
             .file_stem()
@@ -201,8 +274,8 @@ impl ContactSheetGenerator {
 
         ensure_directory_exists(&temp_dir)?;
 
-        // 使用 scopeguard 確保清理暫存目錄
-        let result = self.process_video_stages(video_path, output_path, &temp_dir);
+        let result =
+            self.process_video_stages_with_progress(video_path, output_path, &temp_dir, progress);
 
         // 清理暫存目錄
         if temp_dir.exists() && fs::remove_dir_all(&temp_dir).is_err() {
@@ -212,11 +285,12 @@ impl ContactSheetGenerator {
         result
     }
 
-    fn process_video_stages(
+    fn process_video_stages_with_progress(
         &self,
         video_path: &Path,
         output_path: &Path,
         temp_dir: &Path,
+        progress: &ProgressBar,
     ) -> Result<()> {
         let video_name = video_path.file_name().map_or_else(
             || "unknown".to_string(),
@@ -224,6 +298,7 @@ impl ContactSheetGenerator {
         );
 
         // Stage A: 取得影片資訊
+        progress.set_message("A: 讀取資訊");
         debug!("{video_name}: 讀取影片資訊...");
         let video_info = get_video_info(video_path)
             .with_context(|| format!("無法讀取影片資訊: {}", video_path.display()))?;
@@ -231,6 +306,7 @@ impl ContactSheetGenerator {
             "{video_name}: {:.1}s, {}x{}",
             video_info.duration_seconds, video_info.width, video_info.height
         );
+        progress.inc(1);
 
         // 檢查影片是否太短
         if video_info.duration_seconds < 1.0 {
@@ -238,12 +314,15 @@ impl ContactSheetGenerator {
         }
 
         // Stage B: 場景變換偵測
+        progress.set_message("B: 偵測場景");
         debug!("{video_name}: 偵測場景變換...");
         let scenes =
             detect_scenes(video_path, &video_info, None).with_context(|| "場景偵測失敗")?;
         debug!("{video_name}: 找到 {} 個場景變換點", scenes.len());
+        progress.inc(1);
 
         // Stage C: 選取時間點
+        progress.set_message("C: 選取時間點");
         debug!("{video_name}: 選取截圖時間點...");
         let timestamps = select_timestamps(
             video_info.duration_seconds,
@@ -251,6 +330,7 @@ impl ContactSheetGenerator {
             DEFAULT_THUMBNAIL_COUNT,
         );
         debug!("{video_name}: 選取 {} 個時間點", timestamps.len());
+        progress.inc(1);
 
         if timestamps.len() < DEFAULT_THUMBNAIL_COUNT {
             anyhow::bail!(
@@ -260,7 +340,8 @@ impl ContactSheetGenerator {
             );
         }
 
-        // Stage D: 擷取縮圖（此階段內部已平行化）
+        // Stage D: 擷取縮圖
+        progress.set_message("D: 擷取縮圖");
         debug!("{video_name}: 擷取縮圖...");
         let tasks = create_thumbnail_tasks(video_path, &timestamps, temp_dir);
         let results = extract_thumbnails_parallel(tasks, &self.shutdown_signal);
@@ -268,6 +349,7 @@ impl ContactSheetGenerator {
         let success_count = results.iter().filter(|r| r.success).count();
         let failed_count = results.len() - success_count;
         debug!("{video_name}: 縮圖擷取完成 - 成功 {success_count}, 失敗 {failed_count}");
+        progress.inc(1);
 
         if success_count < DEFAULT_THUMBNAIL_COUNT {
             anyhow::bail!(
@@ -276,6 +358,7 @@ impl ContactSheetGenerator {
         }
 
         // Stage E: 合併預覽圖
+        progress.set_message("E: 合併圖片");
         debug!("{video_name}: 合併預覽圖...");
 
         // 收集成功的縮圖路徑（按索引排序）
@@ -294,6 +377,7 @@ impl ContactSheetGenerator {
             DEFAULT_GRID_ROWS,
         )
         .with_context(|| "合併預覽圖失敗")?;
+        progress.inc(1);
 
         debug!("{video_name}: 預覽圖生成完成");
 
