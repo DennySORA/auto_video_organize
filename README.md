@@ -1,152 +1,165 @@
 # Auto Video Organize
 
-Auto Video Organize is a Rust CLI for organizing video libraries and mixed media directories. It provides five workflows: video re-encode, duplicate detection, contact sheet generation, auto move by file type, and orphan file cleanup. The prompts are currently in Chinese, but the behaviors below are language-agnostic.
+一個以 Rust 撰寫的互動式 CLI 工具，整合「影片重新編碼、去重、預覽圖生成、依類型整理、孤立檔案清理」等功能，專注於大量影音/混合檔案的整理與批次處理。
 
-## Features
-- Video re-encode to HEVC/x265 with FLAC audio using ffmpeg, with CPU-aware concurrency and failure isolation.
-- Duplicate detection by size plus BLAKE3 hash, with a persistent hash table per directory and duplicates moved to `duplication_file/`.
-- Contact sheet generation using ffprobe and scdet, 54 thumbnails (9x6 grid), output to `_contact_sheets/`.
-- Auto move by type using `file_type_table.json` extension rules, with category folders and an `other/` fallback.
-- Orphan file mover for top-level unmatched stems, moved into `orphan_files/`.
+## 功能概覽
 
-## Requirements
-- Rust toolchain (edition 2024)
-- `ffmpeg` and `ffprobe` on PATH (required for video encoding and contact sheets)
-- Read/write access to the target directories
+- 影片重新編碼：掃描影片後以 ffmpeg 轉為 HEVC/x265（10-bit）+ FLAC 音訊，失敗檔案移至 `fail/`。
+- 資料分析紀錄與去重：以檔案大小 + BLAKE3 雜湊判斷重複檔案，並移動至 `duplication_file/`，同時維護 `.hash_table.json`。
+- 影片預覽圖生成：ffprobe 取資訊 + ffmpeg scdet 場景偵測 + 54 張縮圖拼接為聯絡表（9x6）。
+- 自動依類型整理檔案：依副檔名分類至 `video/ audio/ image/ ...` 等資料夾。
+- 移動孤立檔案：以檔名（不含副檔名）分組，僅有單一檔案的群組視為孤立檔案並移動至 `orphan_files/`。
 
-## Quick Start
+## 架構圖（Mermaid）
+
+```mermaid
+flowchart LR
+    subgraph CLI
+        main[main.rs] --> menu[menu::show_main_menu]
+    end
+
+    menu --> encoder[video_encoder]
+    menu --> dedup[duplication_checker]
+    menu --> contact[contact_sheet_generator]
+    menu --> mover[auto_move_by_type]
+    menu --> orphan[orphan_file_mover]
+
+    subgraph Shared
+        config[config::Config]
+        tools[tools::*]
+        signal[shutdown_signal]
+    end
+
+    encoder --> config
+    encoder --> tools
+    encoder --> signal
+
+    contact --> config
+    contact --> tools
+    contact --> signal
+
+    mover --> config
+    mover --> tools
+    mover --> signal
+
+    orphan --> tools
+    orphan --> signal
+
+    dedup --> tools
+    dedup --> signal
+
+    config --> data[file_type_table.json]
+```
+
+## 流程圖（Mermaid）
+
+```mermaid
+flowchart TD
+    start([啟動]) --> init[init::init / 日誌初始化]
+    init --> menu{主選單}
+
+    menu -->|影片重新編碼| encode[掃描影片 -> 任務排程 -> ffmpeg]
+    menu -->|資料分析紀錄與去重| dedup[掃描檔案 -> BLAKE3 -> 移動重複檔案]
+    menu -->|影片預覽圖生成| sheet[ffprobe -> scdet -> 選點 -> 擷取 -> 合併]
+    menu -->|自動依類型整理| classify[掃描檔案 -> 分類 -> 移動]
+    menu -->|移動孤立檔案| orphan[同名分組 -> 孤立檔案 -> 移動]
+    menu -->|離開| end([結束])
+
+    encode --> menu
+    dedup --> menu
+    sheet --> menu
+    classify --> menu
+    orphan --> menu
+```
+
+## 系統需求
+
+- Rust 2024 Edition（`cargo`）
+- ffmpeg / ffprobe 可在 PATH 中呼叫
+
+## 安裝與執行
+
 ```bash
+cargo build --release
 cargo run
 ```
 
-Select a workflow in the menu and provide the target directory path when prompted.
+程式為互動式選單，依提示輸入目錄路徑即可。
 
-## Example: contact sheet programmatically
+可透過 `RUST_LOG` 調整日誌等級，例如：
+
+```bash
+RUST_LOG=debug cargo run
+```
+
+## 輸出與檔案變更
+
+| 功能 | 輸出/變更 | 備註 |
+| --- | --- | --- |
+| 影片重新編碼 | 產生 `*.convert.mkv` | 失敗檔案移至 `fail/`，中斷時會刪除未完成輸出 |
+| 去重 | `.hash_table.json` + `duplication_file/` | 重複檔案會移動並避免同名衝突 |
+| 預覽圖生成 | `_contact_sheets/*_contact_sheet.jpg` | 產生暫存 `.tmp_*` 目錄後會清理 |
+| 依類型整理 | `video/ audio/ image/ ... other/` | 依 `file_type_table.json` 分類 |
+| 孤立檔案 | `orphan_files/` | 只掃描指定資料夾第一層（不遞迴） |
+
+## 設定檔
+
+- `src/data/file_type_table.json`：副檔名分類表。修改後需重新建置。
+- 目前設定檔載入路徑是編譯期 `CARGO_MANIFEST_DIR`，請確保該路徑存在並包含 `src/data`。
+
+## 範例程式
+
+### 互動式執行範例
+
+```text
+$ cargo run
+=== 自動影片整理系統 ===
+請選擇功能 > 影片預覽圖生成
+請輸入影片資料夾路徑: /media/videos
+預覽圖將輸出至: /media/videos/_contact_sheets
+掃描影片檔案中...
+找到 3 個影片檔案，依檔案大小排序（由小到大）
+開始平行生成預覽圖（使用 8 個執行緒）...
+...（進度略）
+=== 預覽圖生成摘要 ===
+  總計: 3 個影片
+  成功: 3 個
+```
+
+### 以函式庫方式使用（檔案分類範例）
+
 ```rust
-use auto_video_organize::component::contact_sheet_generator::{
-    create_contact_sheet, create_thumbnail_tasks, detect_scenes, extract_thumbnails_parallel,
-    select_timestamps, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_THUMBNAIL_COUNT,
-};
-use auto_video_organize::tools::{ensure_directory_exists, get_video_info};
+use auto_video_organize::component::auto_move_by_type::FileCategorizer;
+use auto_video_organize::config::Config;
 use std::path::Path;
 use std::sync::{Arc, atomic::AtomicBool};
 
 fn main() -> anyhow::Result<()> {
-    let video_path = Path::new("/path/to/video.mp4");
-    let output_dir = Path::new("/path/to/_contact_sheets");
-    ensure_directory_exists(output_dir)?;
-
-    let info = get_video_info(video_path)?;
-    let scenes = detect_scenes(video_path, &info, None)?;
-    let timestamps = select_timestamps(info.duration_seconds, &scenes, DEFAULT_THUMBNAIL_COUNT);
-
-    let tasks = create_thumbnail_tasks(video_path, &timestamps, output_dir);
+    let config = Config::new()?;
     let shutdown = Arc::new(AtomicBool::new(false));
-    let results = extract_thumbnails_parallel(tasks, &shutdown);
+    let categorizer = FileCategorizer::new(config.file_type_table, shutdown);
 
-    let mut thumbnails: Vec<_> = results
-        .into_iter()
-        .filter(|r| r.success)
-        .map(|r| r.output_path)
-        .collect();
-    thumbnails.sort();
+    let target = Path::new("/path/to/folder");
+    let files = categorizer.scan_and_categorize(target)?;
+    let result = categorizer.move_files_to_categories(&files, target)?;
 
-    let output_path = output_dir.join("video_contact_sheet.jpg");
-    create_contact_sheet(&thumbnails, &output_path, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS)?;
+    println!("移動 {} 個檔案", result.files_moved);
     Ok(())
 }
 ```
 
-## Architecture
-```mermaid
-flowchart TB
-    CLI["CLI (src/main.rs)"] --> MENU["Menu (src/menu)"]
-    MENU --> ENC["VideoEncoder"]
-    MENU --> DEDUPE["DuplicationChecker"]
-    MENU --> SHEET["ContactSheetGenerator"]
-    MENU --> MOVE["AutoMoveByType"]
-    MENU --> ORPHAN["OrphanFileMover"]
+## 測試
 
-    ENC --> TOOLS["Tools (scan, hash, ffprobe, path)"]
-    DEDUPE --> TOOLS
-    SHEET --> TOOLS
-    MOVE --> TOOLS
-    ORPHAN --> TOOLS
-
-    ENC --> FFMPEG["ffmpeg"]
-    SHEET --> FFMPEG
-    SHEET --> FFPROBE["ffprobe"]
-
-    MOVE --> CONFIG["Config"]
-    SHEET --> CONFIG
-    ENC --> CONFIG
-    CONFIG --> TYPES["src/data/file_type_table.json"]
-
-    DEDUPE --> HASH[".hash_table.json (per directory)"]
-    TOOLS --> FS["Filesystem"]
-```
-
-## Flow: Contact Sheet Pipeline
-```mermaid
-flowchart TD
-    START["Start"] --> INPUT["Input directory"]
-    INPUT --> SCAN["Scan video files (recursive)"]
-    SCAN --> LOOP{"For each video"}
-    LOOP --> INFO["A: ffprobe video info"]
-    INFO --> SCDET["B: ffmpeg scdet scene detection"]
-    SCDET --> PICK["C: select timestamps (54)"]
-    PICK --> THUMBS["D: parallel thumbnail extraction"]
-    THUMBS --> MERGE["E: xstack merge to contact sheet"]
-    MERGE --> OUTPUT["Write *_contact_sheet.jpg"]
-```
-
-## Components and behavior
-- VideoEncoder
-  - Recursively scans for video files.
-  - Creates `.convert.mkv` outputs beside the source file.
-  - Uses an adaptive scheduler that spawns new ffmpeg tasks while CPU usage is below 95 percent.
-  - On failure, removes partial output and moves the source file to `fail/`.
-
-- DuplicationChecker
-  - Recursively scans all files in the directory.
-  - Uses file size as a prefilter, then BLAKE3 hash for exact match.
-  - Persists a `.hash_table.json` in the target directory.
-  - Moves duplicates into `duplication_file/` with name conflict suffixes.
-
-- ContactSheetGenerator
-  - Recursively scans for video files and writes output to `_contact_sheets/`.
-  - Five-stage pipeline (info, scene detect, timestamps, thumbnails, merge).
-  - Default grid is 9x6 (54 thumbnails) at 320x180 per tile.
-  - Uses a temporary per-video folder and cleans it after completion.
-
-- AutoMoveByType
-  - Recursively scans all files except existing category folders.
-  - Categorizes by extension using `file_type_table.json`.
-  - Moves files into folders such as `video/`, `audio/`, `image/`, and `other/`.
-
-- OrphanFileMover
-  - Scans only the top-level directory (no recursion).
-  - Groups files by stem; groups with a single file are treated as orphans.
-  - Moves orphans into `orphan_files/`.
-
-## Configuration
-- `src/data/file_type_table.json` controls extension-to-category mapping.
-- Categories map to folders: `video`, `audio`, `image`, `archive`, `document`, `spreadsheet`, `presentation`, `ebook`, `code`, `markup`, `database`, `executable`, `font`, `cad_3d`, `system`, `other`.
-
-## Output directories
-- `fail/` - original files that failed re-encoding.
-- `duplication_file/` - files identified as duplicates.
-- `_contact_sheets/` - generated contact sheets.
-- `orphan_files/` - files without matching stems.
-- `<category>/` - auto-move targets (see Configuration).
-
-## Logging and shutdown
-- Logging uses `env_logger` and respects `RUST_LOG`.
-- Ctrl-C sets a shutdown flag; long-running tasks check it and stop gracefully.
-
-## Testing
 ```bash
 cargo test
 ```
 
-Integration and E2E tests rely on ffmpeg or ffprobe and test data under `/tmp`.
+整合測試與 E2E 測試會讀寫 `/tmp` 下的測試資料，且部分流程需要 ffmpeg/ffprobe。
+
+## 注意事項
+
+- 影片預覽圖與重新編碼會大量使用 CPU，請確保有足夠資源。
+- 檔案移動以 `rename` 為主，跨檔案系統時會改為「複製後刪除」。
+- 掃描行為：
+  - 依類型整理/去重/預覽圖使用遞迴掃描（WalkDir）。
+  - 孤立檔案僅掃描第一層檔案（不含子資料夾）。
