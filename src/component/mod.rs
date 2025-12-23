@@ -7,9 +7,11 @@ pub mod contact_sheet_generator;
 pub mod duplication_checker;
 pub mod orphan_file_mover;
 pub mod video_encoder;
+pub mod video_renamer;
 
 pub use auto_move_by_type::AutoMoveByType;
 pub use contact_sheet_generator::ContactSheetGenerator;
 pub use duplication_checker::DuplicationChecker;
 pub use orphan_file_mover::OrphanFileMover;
 pub use video_encoder::VideoEncoder;
+pub use video_renamer::VideoRenamer;

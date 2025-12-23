@@ -1,6 +1,6 @@
 # Auto Video Organize
 
-一個以 Rust 撰寫的互動式 CLI 工具，整合「影片重新編碼、去重、預覽圖生成、依類型整理、孤立檔案清理」等功能，專注於大量影音/混合檔案的整理與批次處理。
+一個以 Rust 撰寫的互動式 CLI 工具，整合「影片重新編碼、去重、預覽圖生成、依類型整理、孤立檔案清理、依時長排序重新命名」等功能，專注於大量影音/混合檔案的整理與批次處理。
 
 ## 功能概覽
 
@@ -9,6 +9,7 @@
 - 影片預覽圖生成：ffprobe 取資訊 + ffmpeg scdet 場景偵測 + 54 張縮圖拼接為聯絡表（9x6）。
 - 自動依類型整理檔案：依副檔名分類至 `video/ audio/ image/ ...` 等資料夾。
 - 移動孤立檔案：以檔名（不含副檔名）分組，僅有單一檔案的群組視為孤立檔案並移動至 `orphan_files/`。
+- 影片依時長排序重新命名：掃描影片並依時長排序，重新命名為 `[編號] 清理後檔名_UUID.副檔名`，自動移除非法字元與舊 UUID。
 
 ## 架構圖（Mermaid）
 
@@ -23,6 +24,7 @@ flowchart LR
     menu --> contact[contact_sheet_generator]
     menu --> mover[auto_move_by_type]
     menu --> orphan[orphan_file_mover]
+    menu --> renamer[video_renamer]
 
     subgraph Shared
         config[config::Config]
@@ -48,6 +50,10 @@ flowchart LR
     dedup --> tools
     dedup --> signal
 
+    renamer --> config
+    renamer --> tools
+    renamer --> signal
+
     config --> data[file_type_table.json]
 ```
 
@@ -63,6 +69,7 @@ flowchart TD
     menu -->|影片預覽圖生成| sheet[ffprobe -> scdet -> 選點 -> 擷取 -> 合併]
     menu -->|自動依類型整理| classify[掃描檔案 -> 分類 -> 移動]
     menu -->|移動孤立檔案| orphan[同名分組 -> 孤立檔案 -> 移動]
+    menu -->|依時長排序重新命名| rename[掃描影片 -> ffprobe取時長 -> 排序 -> 清理檔名 -> 重新命名]
     menu -->|離開| end([結束])
 
     encode --> menu
@@ -70,6 +77,7 @@ flowchart TD
     sheet --> menu
     classify --> menu
     orphan --> menu
+    rename --> menu
 ```
 
 ## 系統需求
@@ -101,6 +109,7 @@ RUST_LOG=debug cargo run
 | 預覽圖生成 | `_contact_sheets/*_contact_sheet.jpg` | 產生暫存 `.tmp_*` 目錄後會清理 |
 | 依類型整理 | `video/ audio/ image/ ... other/` | 依 `file_type_table.json` 分類 |
 | 孤立檔案 | `orphan_files/` | 只掃描指定資料夾第一層（不遞迴） |
+| 依時長排序重新命名 | `[編號] 檔名_UUID.副檔名` | 移除非法字元、舊UUID，多個`.convert`保留一個 |
 
 ## 設定檔
 

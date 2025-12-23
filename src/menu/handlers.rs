@@ -1,5 +1,6 @@
 use crate::component::{
     AutoMoveByType, ContactSheetGenerator, DuplicationChecker, OrphanFileMover, VideoEncoder,
+    VideoRenamer,
 };
 use crate::config::Config;
 use crate::pause;
@@ -59,6 +60,18 @@ pub fn run_orphan_file_mover(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> 
     let mover = OrphanFileMover::new(Arc::clone(shutdown_signal));
 
     if let Err(e) = mover.run() {
+        eprintln!("{} {}", style("錯誤:").red().bold(), e);
+    }
+
+    pause(term)?;
+    Ok(())
+}
+
+pub fn run_video_renamer(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
+    let config = Config::new()?;
+    let renamer = VideoRenamer::new(config, Arc::clone(shutdown_signal));
+
+    if let Err(e) = renamer.run() {
         eprintln!("{} {}", style("錯誤:").red().bold(), e);
     }
 

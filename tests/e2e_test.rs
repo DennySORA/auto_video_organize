@@ -14,8 +14,11 @@ use auto_video_organize::component::contact_sheet_generator::{
 };
 use auto_video_organize::component::duplication_checker::DuplicationDetector;
 use auto_video_organize::component::orphan_file_mover::FileGrouper;
+use auto_video_organize::component::video_renamer::{FilenameCleaner, VideoSorter};
 use auto_video_organize::config::{Config, FileCategory};
-use auto_video_organize::tools::{ensure_directory_exists, get_video_info, scan_all_files};
+use auto_video_organize::tools::{
+    ensure_directory_exists, get_video_info, scan_all_files, scan_video_files,
+};
 
 /// 測試 Duplication Checker 功能
 #[test]
@@ -455,4 +458,207 @@ fn test_orphan_file_mover_e2e() {
     );
 
     println!("\n✓ 孤立檔案移動 E2E 測試通過");
+}
+
+/// 測試影片依時長排序重新命名功能
+#[test]
+fn test_video_renamer_e2e() {
+    use std::process::Command;
+    use uuid::Uuid;
+
+    // 使用獨立的測試目錄
+    let test_dir = Path::new("/tmp/e2e_test/video_renamer_test");
+
+    // 清理並重建測試目錄
+    if test_dir.exists() {
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+    fs::create_dir_all(test_dir).unwrap();
+
+    println!("=== 測試影片依時長排序重新命名 ===\n");
+
+    // 生成不同時長的測試影片
+    let test_videos = [
+        ("[1] old video [12345678-1234-1234-1234-123456789abc].mp4", 5),
+        ("some<>illegal:chars_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.convert.convert.mkv", 15),
+        ("shortest video.mp4", 3),
+        ("[99] 中文影片名稱.convert.mp4", 10),
+        ("normal video file.avi", 8),
+    ];
+
+    println!("建立測試影片...");
+    for (filename, duration) in &test_videos {
+        let output_path = test_dir.join(filename);
+        let status = Command::new("ffmpeg")
+            .args([
+                "-f", "lavfi",
+                "-i", &format!("testsrc=duration={}:size=160x120:rate=10", duration),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-y",
+            ])
+            .arg(&output_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            println!("跳過測試：無法建立測試影片（需要 ffmpeg）");
+            return;
+        }
+        println!("  ✓ 建立 {} ({}秒)", filename, duration);
+    }
+
+    // 載入配置
+    let config = Config::new().expect("無法載入配置");
+    let shutdown_signal = Arc::new(AtomicBool::new(false));
+
+    // 掃描影片
+    println!("\n掃描影片檔案...");
+    let videos = scan_video_files(test_dir, &config.file_type_table).expect("掃描失敗");
+    assert_eq!(videos.len(), 5, "應該有 5 個影片");
+    println!("  找到 {} 個影片", videos.len());
+
+    // 取得時長並排序
+    println!("\n取得時長並排序...");
+    let video_sorter = VideoSorter::new();
+    let (sorted_videos, failed) = video_sorter
+        .sort_by_duration(videos, &shutdown_signal)
+        .expect("排序失敗");
+
+    assert_eq!(failed, 0, "不應該有失敗的檔案");
+    assert_eq!(sorted_videos.len(), 5, "應該有 5 個排序後的影片");
+
+    // 驗證排序順序（依時長從短到長）
+    println!("\n排序結果（依時長從短到長）：");
+    let expected_order = [3.0, 5.0, 8.0, 10.0, 15.0];
+    for (i, video) in sorted_videos.iter().enumerate() {
+        let filename = video.path.file_name().unwrap().to_string_lossy();
+        println!(
+            "  {}. [{:.0}秒] {}",
+            i + 1,
+            video.duration_seconds,
+            filename
+        );
+        assert!(
+            (video.duration_seconds - expected_order[i]).abs() < 1.0,
+            "第 {} 個影片時長應該約為 {} 秒，實際為 {} 秒",
+            i + 1,
+            expected_order[i],
+            video.duration_seconds
+        );
+    }
+
+    // 測試檔名清理器
+    println!("\n=== 測試檔名清理器 ===\n");
+    let cleaner = FilenameCleaner::new();
+
+    // 測試各種檔名清理情況
+    let test_cases = [
+        (
+            "[1] old video [12345678-1234-1234-1234-123456789abc].mp4",
+            "old video",
+            "mp4",
+            false,
+        ),
+        (
+            "some<>illegal:chars_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.convert.convert.mkv",
+            "some illegal chars",
+            "mkv",
+            true,
+        ),
+        ("shortest video.mp4", "shortest video", "mp4", false),
+        ("[99] 中文影片名稱.convert.mp4", "中文影片名稱", "mp4", true),
+        ("normal video file.avi", "normal video file", "avi", false),
+    ];
+
+    for (input, expected_base, expected_ext, expected_convert) in &test_cases {
+        let cleaned = cleaner.clean(input);
+        println!("輸入: {}", input);
+        println!("  base_name: {} (預期: {})", cleaned.base_name, expected_base);
+        println!("  extension: {} (預期: {})", cleaned.extension, expected_ext);
+        println!(
+            "  has_convert: {} (預期: {})",
+            cleaned.has_convert, expected_convert
+        );
+
+        assert_eq!(
+            cleaned.base_name, *expected_base,
+            "base_name 不符合預期"
+        );
+        assert_eq!(
+            cleaned.extension, *expected_ext,
+            "extension 不符合預期"
+        );
+        assert_eq!(
+            cleaned.has_convert, *expected_convert,
+            "has_convert 不符合預期"
+        );
+        println!();
+    }
+
+    // 測試重新命名格式
+    println!("=== 測試重新命名格式 ===\n");
+    for (i, video) in sorted_videos.iter().enumerate() {
+        let filename = video.path.file_name().unwrap().to_string_lossy();
+        let cleaned = cleaner.clean(&filename);
+        let new_uuid = Uuid::new_v4().to_string();
+        let new_name = cleaner.format_new_filename(i + 1, &cleaned, &new_uuid);
+
+        println!("原始: {}", filename);
+        println!("新名: {}", new_name);
+        println!();
+
+        // 驗證新名稱格式
+        assert!(
+            new_name.starts_with(&format!("[{}] ", i + 1)),
+            "新名稱應該以編號開頭"
+        );
+        assert!(
+            new_name.contains(&new_uuid),
+            "新名稱應該包含 UUID"
+        );
+    }
+
+    // 實際執行重新命名
+    println!("=== 執行重新命名 ===\n");
+    for (i, video) in sorted_videos.iter().enumerate() {
+        let filename = video.path.file_name().unwrap().to_string_lossy();
+        let cleaned = cleaner.clean(&filename);
+        let new_uuid = Uuid::new_v4().to_string();
+        let new_name = cleaner.format_new_filename(i + 1, &cleaned, &new_uuid);
+        let new_path = video.path.parent().unwrap().join(&new_name);
+
+        fs::rename(&video.path, &new_path).expect("重新命名失敗");
+        println!("✓ {} -> {}", filename, new_name);
+    }
+
+    // 驗證重新命名結果
+    println!("\n=== 驗證重新命名結果 ===\n");
+    let renamed_files: Vec<_> = fs::read_dir(test_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .collect();
+
+    assert_eq!(renamed_files.len(), 5, "應該仍有 5 個檔案");
+
+    for entry in &renamed_files {
+        let filename = entry.file_name().to_string_lossy().to_string();
+        println!("  {}", filename);
+
+        // 驗證檔名格式
+        assert!(
+            filename.starts_with('['),
+            "檔名應該以 '[' 開頭: {}",
+            filename
+        );
+        assert!(
+            filename.contains('_'),
+            "檔名應該包含 '_': {}",
+            filename
+        );
+    }
+
+    println!("\n✓ 影片依時長排序重新命名 E2E 測試通過");
 }
