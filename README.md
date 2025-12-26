@@ -1,174 +1,175 @@
 # Auto Video Organize
 
-一個以 Rust 撰寫的互動式 CLI 工具，整合「影片重新編碼、去重、預覽圖生成、依類型整理、孤立檔案清理、依時長排序重新命名」等功能，專注於大量影音/混合檔案的整理與批次處理。
+## English
 
-## 功能概覽
+### Overview
+This repository focuses on consistent releases, reliable automation, and clear project documentation. The README stays intentionally high-level and avoids implementation details.
 
-- 影片重新編碼：掃描影片後以 ffmpeg 轉為 HEVC/x265（10-bit）+ FLAC 音訊，失敗檔案移至 `fail/`。
-- 資料分析紀錄與去重：以檔案大小 + BLAKE3 雜湊判斷重複檔案，並移動至 `duplication_file/`，同時維護 `.hash_table.json`。
-- 影片預覽圖生成：ffprobe 取資訊 + ffmpeg scdet 場景偵測 + 54 張縮圖拼接為聯絡表（9x6）。
-- 自動依類型整理檔案：依副檔名分類至 `video/ audio/ image/ ...` 等資料夾。
-- 移動孤立檔案：以檔名（不含副檔名）分組，僅有單一檔案的群組視為孤立檔案並移動至 `orphan_files/`。
-- 影片依時長排序重新命名：掃描影片並依時長排序，重新命名為 `[編號] 清理後檔名_UUID.副檔名`，自動移除非法字元與舊 UUID。
-
-## 架構圖（Mermaid）
-
-```mermaid
-flowchart LR
-    subgraph CLI
-        main[main.rs] --> menu[menu::show_main_menu]
-    end
-
-    menu --> encoder[video_encoder]
-    menu --> dedup[duplication_checker]
-    menu --> contact[contact_sheet_generator]
-    menu --> mover[auto_move_by_type]
-    menu --> orphan[orphan_file_mover]
-    menu --> renamer[video_renamer]
-
-    subgraph Shared
-        config[config::Config]
-        tools[tools::*]
-        signal[shutdown_signal]
-    end
-
-    encoder --> config
-    encoder --> tools
-    encoder --> signal
-
-    contact --> config
-    contact --> tools
-    contact --> signal
-
-    mover --> config
-    mover --> tools
-    mover --> signal
-
-    orphan --> tools
-    orphan --> signal
-
-    dedup --> tools
-    dedup --> signal
-
-    renamer --> config
-    renamer --> tools
-    renamer --> signal
-
-    config --> data[file_type_table.json]
-```
-
-## 流程圖（Mermaid）
-
-```mermaid
-flowchart TD
-    start([啟動]) --> init[init::init / 日誌初始化]
-    init --> menu{主選單}
-
-    menu -->|影片重新編碼| encode[掃描影片 -> 任務排程 -> ffmpeg]
-    menu -->|資料分析紀錄與去重| dedup[掃描檔案 -> BLAKE3 -> 移動重複檔案]
-    menu -->|影片預覽圖生成| sheet[ffprobe -> scdet -> 選點 -> 擷取 -> 合併]
-    menu -->|自動依類型整理| classify[掃描檔案 -> 分類 -> 移動]
-    menu -->|移動孤立檔案| orphan[同名分組 -> 孤立檔案 -> 移動]
-    menu -->|依時長排序重新命名| rename[掃描影片 -> ffprobe取時長 -> 排序 -> 清理檔名 -> 重新命名]
-    menu -->|離開| end([結束])
-
-    encode --> menu
-    dedup --> menu
-    sheet --> menu
-    classify --> menu
-    orphan --> menu
-    rename --> menu
-```
-
-## 系統需求
-
-- Rust 2024 Edition（`cargo`）
-- ffmpeg / ffprobe 可在 PATH 中呼叫
-
-## 安裝與執行
-
+### Install
+One-line install (builds from source):
 ```bash
-cargo build --release
-cargo run
+curl -fsSL https://raw.githubusercontent.com/DennySORA/Auto-Video-Organize/main/install.sh | bash
 ```
 
-程式為互動式選單，依提示輸入目錄路徑即可。
+Requirements:
+- `git`
+- Rust toolchain (`cargo`)
 
-可透過 `RUST_LOG` 調整日誌等級，例如：
+Release binaries (recommended):
+1. Download the asset matching your OS/arch from GitHub Releases.
+2. Extract it (`.tar.gz` on macOS/Linux, `.zip` on Windows).
+3. Move the binary to a directory on your `PATH` (e.g. `~/.local/bin`).
 
+Source build (manual):
+1. `git clone https://github.com/DennySORA/Auto-Video-Organize.git`
+2. `cd Auto-Video-Organize`
+3. `cargo build --release --locked`
+4. Copy `target/release/auto_video_organize` to a directory on your `PATH`.
+
+Script options:
+- `REF` to select a tag/branch (default: `main`).
+- `PREFIX` or `BIN_DIR` to change the install location.
+
+### CI/CD
+- Security scanning for dependency advisories
+- Unit tests on every push and pull request
+- Automatic Release creation when a tag is pushed (e.g. v1.2.3)
+- Release assets include prebuilt binaries
+
+### Contributing
+Open an issue or pull request with a clear scope and rationale.
+
+### Support
+Use GitHub Issues for questions and requests.
+
+---
+
+## 繁體中文
+
+### 概覽
+此倉庫以一致的發佈流程、可靠的自動化與清楚的專案文件為目標，README 刻意保持高層描述，不涉及實作細節。
+
+### 安裝
+一行安裝（從原始碼建置）：
 ```bash
-RUST_LOG=debug cargo run
+curl -fsSL https://raw.githubusercontent.com/DennySORA/Auto-Video-Organize/main/install.sh | bash
 ```
 
-## 輸出與檔案變更
+需求：
+- `git`
+- Rust 工具鏈（`cargo`）
 
-| 功能 | 輸出/變更 | 備註 |
-| --- | --- | --- |
-| 影片重新編碼 | 產生 `*.convert.mkv` | 失敗檔案移至 `fail/`，中斷時會刪除未完成輸出 |
-| 去重 | `.hash_table.json` + `duplication_file/` | 重複檔案會移動並避免同名衝突 |
-| 預覽圖生成 | `_contact_sheets/*_contact_sheet.jpg` | 產生暫存 `.tmp_*` 目錄後會清理 |
-| 依類型整理 | `video/ audio/ image/ ... other/` | 依 `file_type_table.json` 分類 |
-| 孤立檔案 | `orphan_files/` | 只掃描指定資料夾第一層（不遞迴） |
-| 依時長排序重新命名 | `[編號] 檔名_UUID.副檔名` | 移除非法字元、舊UUID，多個`.convert`保留一個 |
+Release 二進位（建議）：
+1. 到 GitHub Releases 下載對應作業系統/架構的檔案。
+2. 解壓縮（macOS/Linux 為 `.tar.gz`，Windows 為 `.zip`）。
+3. 將執行檔移到 `PATH` 目錄（例如 `~/.local/bin`）。
 
-## 設定檔
+原始碼建置（手動）：
+1. `git clone https://github.com/DennySORA/Auto-Video-Organize.git`
+2. `cd Auto-Video-Organize`
+3. `cargo build --release --locked`
+4. 將 `target/release/auto_video_organize` 複製到 `PATH` 目錄。
 
-- `src/data/file_type_table.json`：副檔名分類表。修改後需重新建置。
-- 目前設定檔載入路徑是編譯期 `CARGO_MANIFEST_DIR`，請確保該路徑存在並包含 `src/data`。
+腳本選項：
+- `REF` 指定 tag/branch（預設：`main`）。
+- `PREFIX` 或 `BIN_DIR` 調整安裝路徑。
 
-## 範例程式
+### CI/CD
+- 安全掃描（相依性漏洞通報）
+- 每次 push 與 PR 執行單元測試
+- 以 tag 觸發自動發佈 Release（例如 v1.2.3）
+- Release 內含預先編譯的二進位
 
-### 互動式執行範例
+### 貢獻
+歡迎提交 issue 或 PR，請清楚描述範圍與理由。
 
-```text
-$ cargo run
-=== 自動影片整理系統 ===
-請選擇功能 > 影片預覽圖生成
-請輸入影片資料夾路徑: /media/videos
-預覽圖將輸出至: /media/videos/_contact_sheets
-掃描影片檔案中...
-找到 3 個影片檔案，依檔案大小排序（由小到大）
-開始平行生成預覽圖（使用 8 個執行緒）...
-...（進度略）
-=== 預覽圖生成摘要 ===
-  總計: 3 個影片
-  成功: 3 個
-```
+### 支援
+問題與需求請使用 GitHub Issues。
 
-### 以函式庫方式使用（檔案分類範例）
+---
 
-```rust
-use auto_video_organize::component::auto_move_by_type::FileCategorizer;
-use auto_video_organize::config::Config;
-use std::path::Path;
-use std::sync::{Arc, atomic::AtomicBool};
+## 简体中文
 
-fn main() -> anyhow::Result<()> {
-    let config = Config::new()?;
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let categorizer = FileCategorizer::new(config.file_type_table, shutdown);
+### 概览
+此仓库聚焦于一致的发布流程、可靠的自动化与清晰的项目文档。README 保持高层描述，不涉及实现细节。
 
-    let target = Path::new("/path/to/folder");
-    let files = categorizer.scan_and_categorize(target)?;
-    let result = categorizer.move_files_to_categories(&files, target)?;
-
-    println!("移動 {} 個檔案", result.files_moved);
-    Ok(())
-}
-```
-
-## 測試
-
+### 安装
+一行安装（从源码构建）：
 ```bash
-cargo test
+curl -fsSL https://raw.githubusercontent.com/DennySORA/Auto-Video-Organize/main/install.sh | bash
 ```
 
-整合測試與 E2E 測試會讀寫 `/tmp` 下的測試資料，且部分流程需要 ffmpeg/ffprobe。
+需求：
+- `git`
+- Rust 工具链（`cargo`）
 
-## 注意事項
+Release 二进制（推荐）：
+1. 到 GitHub Releases 下载对应操作系统/架构的文件。
+2. 解压（macOS/Linux 为 `.tar.gz`，Windows 为 `.zip`）。
+3. 将可执行文件移动到 `PATH` 目录（例如 `~/.local/bin`）。
 
-- 影片預覽圖與重新編碼會大量使用 CPU，請確保有足夠資源。
-- 檔案移動以 `rename` 為主，跨檔案系統時會改為「複製後刪除」。
-- 掃描行為：
-  - 依類型整理/去重/預覽圖使用遞迴掃描（WalkDir）。
-  - 孤立檔案僅掃描第一層檔案（不含子資料夾）。
+源码构建（手动）：
+1. `git clone https://github.com/DennySORA/Auto-Video-Organize.git`
+2. `cd Auto-Video-Organize`
+3. `cargo build --release --locked`
+4. 将 `target/release/auto_video_organize` 复制到 `PATH` 目录。
+
+脚本选项：
+- `REF` 指定 tag/branch（默认：`main`）。
+- `PREFIX` 或 `BIN_DIR` 调整安装路径。
+
+### CI/CD
+- 安全扫描（依赖项漏洞通告）
+- 每次 push 与 PR 执行单元测试
+- 打 tag 时自动发布 Release（例如 v1.2.3）
+- Release 内含预编译二进制
+
+### 贡献
+欢迎提交 issue 或 PR，请清楚说明范围与理由。
+
+### 支持
+问题与需求请使用 GitHub Issues。
+
+---
+
+## 日本語
+
+### 概要
+このリポジトリは、一貫したリリース、信頼できる自動化、明確なドキュメントを重視しています。README は高レベルに留め、実装の詳細には触れません。
+
+### インストール
+ワンライン（ソースからビルド）：
+```bash
+curl -fsSL https://raw.githubusercontent.com/DennySORA/Auto-Video-Organize/main/install.sh | bash
+```
+
+要件：
+- `git`
+- Rust ツールチェーン（`cargo`）
+
+Release バイナリ（推奨）：
+1. GitHub Releases から OS/アーキテクチャに合うアセットを取得します。
+2. 解凍します（macOS/Linux は `.tar.gz`、Windows は `.zip`）。
+3. 実行ファイルを `PATH` 配下（例: `~/.local/bin`）へ移動します。
+
+ソースビルド（手動）：
+1. `git clone https://github.com/DennySORA/Auto-Video-Organize.git`
+2. `cd Auto-Video-Organize`
+3. `cargo build --release --locked`
+4. `target/release/auto_video_organize` を `PATH` 配下へコピーします。
+
+スクリプトのオプション：
+- `REF` で tag/branch を指定（デフォルト: `main`）。
+- `PREFIX` または `BIN_DIR` でインストール先を変更。
+
+### CI/CD
+- 依存関係の脆弱性チェック
+- プッシュ／PR ごとのユニットテスト
+- タグ作成時に自動で Release を公開（例: v1.2.3）
+- Release にプリビルドのバイナリを同梱
+
+### コントリビュート
+Issue または PR を歓迎します。範囲と理由を明確にしてください。
+
+### サポート
+質問や要望は GitHub Issues を利用してください。
