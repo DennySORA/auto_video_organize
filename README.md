@@ -5,6 +5,16 @@
 ### Overview
 This repository focuses on consistent releases, reliable automation, and clear project documentation. The README stays intentionally high-level and avoids implementation details.
 
+### Features
+This tool provides a suite of utilities to manage large video collections:
+
+- **Video Encoder**: Batch converts videos to HEVC/x265 format using FFmpeg to save space while maintaining quality.
+- **Duplication Checker**: Identifies duplicate files using BLAKE3 hashing and moves them to a separate directory to clean up storage.
+- **Contact Sheet Generator**: Automatically generates contact sheet images for videos. It uses scene detection to pick meaningful timestamps and processes thumbnails in parallel for speed.
+- **Auto Move by Type**: Scans a directory and organizes files into subfolders based on their file extensions.
+- **Orphan File Mover**: Detects and relocates "orphan" files—such as sidecar files or thumbnails that no longer have a corresponding video file.
+- **Video Renamer**: Sorts video files by their duration and renames them to maintain a specific order.
+
 ### Install
 One-line install (builds from source):
 ```bash
