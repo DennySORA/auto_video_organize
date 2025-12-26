@@ -1,0 +1,15 @@
+main_menu:
+  title: "=== 自动视频整理系统 ==="
+  prompt: "请选择功能"
+  exit: "退出"
+  opt_encoder: "视频重新编码"
+  opt_dedup: "数据分析记录与去重"
+  opt_contact: "视频预览图生成"
+  opt_auto_move: "自动按类型整理文件"
+  opt_orphan: "移动孤立文件（无对应文件）"
+  opt_renamer: "视频按时长排序重命名"
+  opt_language: "切换语言 (Change Language)"
+  goodbye: "感谢使用，再见！"
+  error_prefix: "错误:"
+common:
+  press_enter: "按 Enter 继续..."

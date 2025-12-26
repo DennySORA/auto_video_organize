@@ -1,0 +1,15 @@
+main_menu:
+  title: "=== 動画自動整理システム ==="
+  prompt: "機能を選択してください"
+  exit: "終了"
+  opt_encoder: "動画再エンコード"
+  opt_dedup: "データ分析・重複排除"
+  opt_contact: "コンタクトシート生成"
+  opt_auto_move: "ファイルタイプ別自動整理"
+  opt_orphan: "孤立ファイル移動"
+  opt_renamer: "動画再生時間順リネーム"
+  opt_language: "言語切り替え (Change Language)"
+  goodbye: "ご利用ありがとうございました。さようなら！"
+  error_prefix: "エラー:"
+common:
+  press_enter: "Enter を押して続行..."

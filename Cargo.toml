@@ -19,6 +19,7 @@ rayon = "1.11"
 regex = "1.12"
 indicatif = "0.17"
 uuid = { version = "1.16", features = ["v4"] }
+rust-i18n = "3.1.5"
 
 [dev-dependencies]
 tempfile = "3.23"

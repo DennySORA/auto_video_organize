@@ -1,6 +1,53 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
+use std::fmt;
+
+/// 支援的語言
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Language {
+    #[serde(rename = "en-US")]
+    EnUs,
+    #[serde(rename = "zh-TW")]
+    ZhTw,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+    #[serde(rename = "ja-JP")]
+    JaJp,
+}
+
+impl Default for Language {
+    fn default() -> Self {
+        Self::ZhTw
+    }
+}
+
+impl fmt::Display for Language {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EnUs => write!(f, "en-US"),
+            Self::ZhTw => write!(f, "zh-TW"),
+            Self::ZhCn => write!(f, "zh-CN"),
+            Self::JaJp => write!(f, "ja-JP"),
+        }
+    }
+}
+
+impl Language {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EnUs => "en-US",
+            Self::ZhTw => "zh-TW",
+            Self::ZhCn => "zh-CN",
+            Self::JaJp => "ja-JP",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserSettings {
+    pub language: Language,
+}
 
 /// 檔案類型分類
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,6 +231,7 @@ impl FileTypeTable {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub file_type_table: FileTypeTable,
+    pub settings: UserSettings,
 }
 
 #[cfg(test)]

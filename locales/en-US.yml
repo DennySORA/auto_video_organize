@@ -1,0 +1,15 @@
+main_menu:
+  title: "=== Auto Video Organize ==="
+  prompt: "Please select an option"
+  exit: "Exit"
+  opt_encoder: "Video Encoder"
+  opt_dedup: "Data Analysis & Deduplication"
+  opt_contact: "Contact Sheet Generator"
+  opt_auto_move: "Auto Move by File Type"
+  opt_orphan: "Move Orphan Files"
+  opt_renamer: "Rename Videos by Duration"
+  opt_language: "Change Language"
+  goodbye: "Thank you for using, goodbye!"
+  error_prefix: "Error:"
+common:
+  press_enter: "Press Enter to continue..."

@@ -1,0 +1,15 @@
+main_menu:
+  title: "=== 自動影片整理系統 ==="
+  prompt: "請選擇功能"
+  exit: "離開"
+  opt_encoder: "影片重新編碼"
+  opt_dedup: "資料分析紀錄與去重"
+  opt_contact: "影片預覽圖生成"
+  opt_auto_move: "自動依類型整理檔案"
+  opt_orphan: "移動孤立檔案（無對應檔案）"
+  opt_renamer: "影片依時長排序重新命名"
+  opt_language: "切換語言 (Change Language)"
+  goodbye: "感謝使用，再見！"
+  error_prefix: "錯誤:"
+common:
+  press_enter: "按 Enter 繼續..."
