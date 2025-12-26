@@ -1,3 +1,5 @@
+Reports: [English](https://github.com/DennySORA/Ops-Tools) | [繁體中文](https://github.com/DennySORA/Ops-Tools) | [简体中文](https://github.com/DennySORA/Ops-Tools)
+
 # Auto Video Organize
 
 ## English
