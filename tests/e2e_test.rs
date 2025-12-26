@@ -479,8 +479,14 @@ fn test_video_renamer_e2e() {
 
     // 生成不同時長的測試影片
     let test_videos = [
-        ("[1] old video [12345678-1234-1234-1234-123456789abc].mp4", 5),
-        ("some<>illegal:chars_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.convert.convert.mkv", 15),
+        (
+            "[1] old video [12345678-1234-1234-1234-123456789abc].mp4",
+            5,
+        ),
+        (
+            "some<>illegal:chars_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.convert.convert.mkv",
+            15,
+        ),
         ("shortest video.mp4", 3),
         ("[99] 中文影片名稱.convert.mp4", 10),
         ("normal video file.avi", 8),
@@ -491,10 +497,14 @@ fn test_video_renamer_e2e() {
         let output_path = test_dir.join(filename);
         let status = Command::new("ffmpeg")
             .args([
-                "-f", "lavfi",
-                "-i", &format!("testsrc=duration={}:size=160x120:rate=10", duration),
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("testsrc=duration={}:size=160x120:rate=10", duration),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
                 "-y",
             ])
             .arg(&output_path)
@@ -575,21 +585,21 @@ fn test_video_renamer_e2e() {
     for (input, expected_base, expected_ext, expected_convert) in &test_cases {
         let cleaned = cleaner.clean(input);
         println!("輸入: {}", input);
-        println!("  base_name: {} (預期: {})", cleaned.base_name, expected_base);
-        println!("  extension: {} (預期: {})", cleaned.extension, expected_ext);
+        println!(
+            "  base_name: {} (預期: {})",
+            cleaned.base_name, expected_base
+        );
+        println!(
+            "  extension: {} (預期: {})",
+            cleaned.extension, expected_ext
+        );
         println!(
             "  has_convert: {} (預期: {})",
             cleaned.has_convert, expected_convert
         );
 
-        assert_eq!(
-            cleaned.base_name, *expected_base,
-            "base_name 不符合預期"
-        );
-        assert_eq!(
-            cleaned.extension, *expected_ext,
-            "extension 不符合預期"
-        );
+        assert_eq!(cleaned.base_name, *expected_base, "base_name 不符合預期");
+        assert_eq!(cleaned.extension, *expected_ext, "extension 不符合預期");
         assert_eq!(
             cleaned.has_convert, *expected_convert,
             "has_convert 不符合預期"
@@ -614,10 +624,7 @@ fn test_video_renamer_e2e() {
             new_name.starts_with(&format!("[{}] ", i + 1)),
             "新名稱應該以編號開頭"
         );
-        assert!(
-            new_name.contains(&new_uuid),
-            "新名稱應該包含 UUID"
-        );
+        assert!(new_name.contains(&new_uuid), "新名稱應該包含 UUID");
     }
 
     // 實際執行重新命名
@@ -653,11 +660,7 @@ fn test_video_renamer_e2e() {
             "檔名應該以 '[' 開頭: {}",
             filename
         );
-        assert!(
-            filename.contains('_'),
-            "檔名應該包含 '_': {}",
-            filename
-        );
+        assert!(filename.contains('_'), "檔名應該包含 '_': {}", filename);
     }
 
     println!("\n✓ 影片依時長排序重新命名 E2E 測試通過");

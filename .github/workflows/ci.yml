@@ -28,6 +28,9 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -35,4 +38,5 @@ jobs:
       - name: Security audit
         uses: rustsec/audit-check@v1
         with:
+          deny: vulnerabilities
           token: ${{ secrets.GITHUB_TOKEN }}
