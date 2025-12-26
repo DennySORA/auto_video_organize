@@ -1,8 +1,8 @@
 use anyhow::Result;
+use auto_video_organize::config::types::Config;
 use auto_video_organize::init;
 use auto_video_organize::menu::show_main_menu;
 use auto_video_organize::signal::setup_shutdown_signal;
-use auto_video_organize::config::types::Config;
 use console::{Term, style};
 use log::{info, warn};
 use rust_i18n::t;
@@ -16,7 +16,7 @@ fn main() -> Result<()> {
     init::init();
     let term = Term::stdout();
     let shutdown_signal = setup_shutdown_signal();
-    
+
     // Load config and set locale
     let mut config = Config::new()?;
     rust_i18n::set_locale(config.settings.language.as_str());

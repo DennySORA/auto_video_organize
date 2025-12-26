@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::Path;
 use std::fmt;
+use std::path::Path;
 
 /// 支援的語言
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

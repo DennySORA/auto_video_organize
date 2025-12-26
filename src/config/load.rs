@@ -14,10 +14,13 @@ impl Config {
         let data_dir = get_data_dir();
         let file_type_table_path = data_dir.join("file_type_table.json");
         let file_type_table = Self::load_file_type_table(&file_type_table_path)?;
-        
+
         let settings = Self::load_settings().unwrap_or_default();
-        
-        Ok(Self { file_type_table, settings })
+
+        Ok(Self {
+            file_type_table,
+            settings,
+        })
     }
 
     fn load_settings() -> Result<UserSettings> {
@@ -25,10 +28,10 @@ impl Config {
         if !path.exists() {
             return Ok(UserSettings::default());
         }
-        
+
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read settings from {}", path.display()))?;
-            
+
         serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse settings from {}", path.display()))
     }
