@@ -4,7 +4,7 @@ use anyhow::Result;
 use console::style;
 use dialoguer::Input;
 use log::info;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -27,7 +27,7 @@ impl DuplicationChecker {
 
         println!("{}", style("掃描檔案中...").dim());
 
-        let hash_table_path = self.get_hash_table_path(&directory);
+        let hash_table_path = self.get_hash_table_path();
 
         let mut detector = DuplicationDetector::new(
             &hash_table_path,
@@ -49,8 +49,9 @@ impl DuplicationChecker {
         Ok(path.trim().to_string())
     }
 
-    fn get_hash_table_path(&self, base_directory: &Path) -> PathBuf {
-        base_directory.join(".hash_table.json")
+    fn get_hash_table_path(&self) -> PathBuf {
+        // 存放在程式執行的當前目錄，方便與程式一起移動
+        PathBuf::from("hash_table.json")
     }
 
     fn print_summary(&self, result: &DuplicationResult) {
