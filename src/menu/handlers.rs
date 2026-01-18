@@ -25,8 +25,12 @@ pub fn run_video_encoder(
     Ok(())
 }
 
-pub fn run_duplication_checker(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let checker = DuplicationChecker::new(Arc::clone(shutdown_signal));
+pub fn run_duplication_checker(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let checker = DuplicationChecker::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = checker.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);

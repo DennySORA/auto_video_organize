@@ -45,7 +45,7 @@ pub fn show_main_menu(
             Ok(true)
         }
         Some(1) => {
-            run_duplication_checker(term, shutdown_signal)?;
+            run_duplication_checker(term, shutdown_signal, config)?;
             Ok(true)
         }
         Some(2) => {
