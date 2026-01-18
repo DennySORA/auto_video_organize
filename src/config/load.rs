@@ -3,18 +3,12 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-fn get_data_dir() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/data")
-        .leak()
-}
+/// 編譯時嵌入的檔案類型設定（不需要外部檔案）
+const FILE_TYPE_TABLE_JSON: &str = include_str!("../data/file_type_table.json");
 
 impl Config {
     pub fn new() -> Result<Self> {
-        let data_dir = get_data_dir();
-        let file_type_table_path = data_dir.join("file_type_table.json");
-        let file_type_table = Self::load_file_type_table(&file_type_table_path)?;
-
+        let file_type_table = Self::load_embedded_file_type_table()?;
         let settings = Self::load_settings().unwrap_or_default();
 
         Ok(Self {
@@ -36,10 +30,8 @@ impl Config {
             .with_context(|| format!("Failed to parse settings from {}", path.display()))
     }
 
-    fn load_file_type_table(path: &Path) -> Result<FileTypeTable> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("無法讀取檔案類型設定: {}", path.display()))?;
-        serde_json::from_str(&content)
-            .with_context(|| format!("無法解析檔案類型設定: {}", path.display()))
+    /// 從編譯時嵌入的 JSON 載入檔案類型表
+    fn load_embedded_file_type_table() -> Result<FileTypeTable> {
+        serde_json::from_str(FILE_TYPE_TABLE_JSON).context("無法解析嵌入的檔案類型設定")
     }
 }
