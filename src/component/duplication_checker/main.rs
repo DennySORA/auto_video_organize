@@ -1,6 +1,6 @@
 use super::duplication_detector::{DuplicationDetector, DuplicationResult};
-use crate::config::save::{add_recent_path, save_settings};
 use crate::config::Config;
+use crate::config::save::{add_recent_path, save_settings};
 use crate::tools::validate_directory_exists;
 use anyhow::Result;
 use console::style;
