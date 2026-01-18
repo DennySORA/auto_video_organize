@@ -58,10 +58,20 @@ impl VideoEncoder {
         }
 
         println!();
+        // 顯示轉檔後處理設定
+        let post_action = self.config.settings.video_encoder.post_encode_action;
+        if post_action != crate::config::PostEncodeAction::None {
+            println!("{}", style(format!("轉檔後處理: {post_action}")).dim());
+        }
+
         println!("{}", style("開始編碼任務...").cyan());
 
-        let mut scheduler =
-            TaskScheduler::new(video_files, &directory, Arc::clone(&self.shutdown_signal))?;
+        let mut scheduler = TaskScheduler::new(
+            video_files,
+            &directory,
+            Arc::clone(&self.shutdown_signal),
+            post_action,
+        )?;
 
         if let Err(e) = scheduler.run() {
             error!("編碼任務執行失敗: {e}");

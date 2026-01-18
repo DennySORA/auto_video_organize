@@ -1,5 +1,6 @@
 use super::cpu_monitor::CpuMonitor;
 use super::ffmpeg_command::FfmpegCommand;
+use crate::config::PostEncodeAction;
 use crate::tools::{VideoFileInfo, ensure_directory_exists};
 use anyhow::{Context, Result};
 use log::{error, info, warn};
@@ -53,6 +54,8 @@ pub struct TaskScheduler {
     cpu_monitor: CpuMonitor,
     shutdown_signal: Arc<AtomicBool>,
     fail_directory: PathBuf,
+    finish_directory: PathBuf,
+    post_encode_action: PostEncodeAction,
 }
 
 impl TaskScheduler {
@@ -60,9 +63,16 @@ impl TaskScheduler {
         video_files: Vec<VideoFileInfo>,
         base_directory: &Path,
         shutdown_signal: Arc<AtomicBool>,
+        post_encode_action: PostEncodeAction,
     ) -> Result<Self> {
         let fail_directory = base_directory.join("fail");
+        let finish_directory = base_directory.join("finish");
         ensure_directory_exists(&fail_directory)?;
+
+        // 只有在需要時才建立 finish 目錄
+        if post_encode_action != PostEncodeAction::None {
+            ensure_directory_exists(&finish_directory)?;
+        }
 
         let tasks = video_files.iter().map(EncodingTask::new).collect();
 
@@ -72,6 +82,8 @@ impl TaskScheduler {
             cpu_monitor: CpuMonitor::default(),
             shutdown_signal,
             fail_directory,
+            finish_directory,
+            post_encode_action,
         })
     }
 
@@ -181,6 +193,11 @@ impl TaskScheduler {
                 if success {
                     task.status = TaskStatus::Completed;
                     info!("編碼完成 [{}]: {}", pid, task.destination_path.display());
+
+                    // 執行轉檔後處理
+                    if let Err(e) = self.handle_post_encode_action(process.task_index) {
+                        warn!("轉檔後處理失敗: {}", e);
+                    }
                 } else {
                     let stderr = process.child.stderr.take();
                     let error_msg = stderr
@@ -238,6 +255,56 @@ impl TaskScheduler {
         );
 
         Ok(())
+    }
+
+    /// 處理轉檔成功後的動作
+    fn handle_post_encode_action(&self, task_index: usize) -> Result<()> {
+        let task = &self.tasks[task_index];
+
+        match self.post_encode_action {
+            PostEncodeAction::None => {
+                // 不做任何動作
+                Ok(())
+            }
+            PostEncodeAction::MoveOldToFinish => {
+                // 移動舊影片（原始檔案）到 finish 資料夾
+                let file_name = task
+                    .source_path
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("無法取得檔案名稱"))?;
+                let finish_path = self.finish_directory.join(file_name);
+
+                fs::rename(&task.source_path, &finish_path).with_context(|| {
+                    format!(
+                        "無法移動原始檔案到 finish 資料夾: {} -> {}",
+                        task.source_path.display(),
+                        finish_path.display()
+                    )
+                })?;
+
+                info!("已移動原始檔案到 finish 資料夾: {}", finish_path.display());
+                Ok(())
+            }
+            PostEncodeAction::MoveNewToFinish => {
+                // 移動新影片（轉檔後檔案）到 finish 資料夾
+                let file_name = task
+                    .destination_path
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("無法取得檔案名稱"))?;
+                let finish_path = self.finish_directory.join(file_name);
+
+                fs::rename(&task.destination_path, &finish_path).with_context(|| {
+                    format!(
+                        "無法移動轉檔檔案到 finish 資料夾: {} -> {}",
+                        task.destination_path.display(),
+                        finish_path.display()
+                    )
+                })?;
+
+                info!("已移動轉檔檔案到 finish 資料夾: {}", finish_path.display());
+                Ok(())
+            }
+        }
     }
 
     fn handle_shutdown(&mut self) -> Result<()> {

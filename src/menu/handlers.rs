@@ -10,9 +10,12 @@ use rust_i18n::t;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-pub fn run_video_encoder(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let config = Config::new()?;
-    let encoder = VideoEncoder::new(config, Arc::clone(shutdown_signal));
+pub fn run_video_encoder(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let encoder = VideoEncoder::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = encoder.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);
@@ -33,9 +36,12 @@ pub fn run_duplication_checker(term: &Term, shutdown_signal: &Arc<AtomicBool>) -
     Ok(())
 }
 
-pub fn run_contact_sheet_generator(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let config = Config::new()?;
-    let generator = ContactSheetGenerator::new(config, Arc::clone(shutdown_signal));
+pub fn run_contact_sheet_generator(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let generator = ContactSheetGenerator::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = generator.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);

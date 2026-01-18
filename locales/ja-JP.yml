@@ -8,8 +8,35 @@ main_menu:
   opt_auto_move: "ファイルタイプ別自動整理"
   opt_orphan: "孤立ファイル移動"
   opt_renamer: "動画再生時間順リネーム"
-  opt_language: "言語切り替え (Change Language)"
+  opt_settings: "設定"
   goodbye: "ご利用ありがとうございました。さようなら！"
   error_prefix: "エラー:"
+
+settings:
+  title: "=== 設定 ==="
+  prompt: "設定項目を選択してください"
+  opt_encoder: "動画エンコード設定"
+  opt_contact_sheet: "サムネイル生成設定"
+  opt_language: "言語設定"
+  back: "メインメニューに戻る"
+  saved: "設定を保存しました:"
+  encoder:
+    title: "=== 動画エンコード設定 ==="
+    prompt: "エンコード完了後の処理"
+    current: "現在の設定:"
+    action_none: "ファイルを移動しない"
+    action_move_old: "元の動画を finish フォルダに移動"
+    action_move_new: "エンコード後の動画を finish フォルダに移動"
+  contact_sheet:
+    title: "=== サムネイル生成設定 ==="
+    prompt: "出力先"
+    current: "現在の設定:"
+    mode_sub_directory: "サブディレクトリに出力 (_contact_sheets)"
+    mode_same_directory: "動画と同じディレクトリに出力"
+  language:
+    title: "=== 言語設定 ==="
+    prompt: "言語を選択してください"
+
 common:
   press_enter: "Enter を押して続行..."
+  esc_hint: "(ESC で戻る)"

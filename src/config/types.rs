@@ -4,22 +4,17 @@ use std::fmt;
 use std::path::Path;
 
 /// 支援的語言
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum Language {
     #[serde(rename = "en-US")]
     EnUs,
     #[serde(rename = "zh-TW")]
+    #[default]
     ZhTw,
     #[serde(rename = "zh-CN")]
     ZhCn,
     #[serde(rename = "ja-JP")]
     JaJp,
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Self::ZhTw
-    }
 }
 
 impl fmt::Display for Language {
@@ -44,9 +39,83 @@ impl Language {
     }
 }
 
+/// 轉檔後處理動作
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum PostEncodeAction {
+    /// 不移動任何檔案（預設）
+    #[default]
+    #[serde(rename = "none")]
+    None,
+    /// 移動舊影片（原始檔案）到 finish 資料夾
+    #[serde(rename = "move_old_to_finish")]
+    MoveOldToFinish,
+    /// 移動新影片（轉檔後檔案）到 finish 資料夾
+    #[serde(rename = "move_new_to_finish")]
+    MoveNewToFinish,
+}
+
+impl fmt::Display for PostEncodeAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "不移動"),
+            Self::MoveOldToFinish => write!(f, "移動舊影片到 finish"),
+            Self::MoveNewToFinish => write!(f, "移動新影片到 finish"),
+        }
+    }
+}
+
+/// 縮圖輸出模式
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ContactSheetOutputMode {
+    /// 輸出到子目錄（預設，向後兼容）
+    #[default]
+    #[serde(rename = "sub_directory")]
+    SubDirectory,
+    /// 輸出到影片同目錄
+    #[serde(rename = "same_directory")]
+    SameDirectory,
+}
+
+impl fmt::Display for ContactSheetOutputMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SubDirectory => write!(f, "子目錄"),
+            Self::SameDirectory => write!(f, "同目錄"),
+        }
+    }
+}
+
+/// 縮圖產生設定
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ContactSheetSettings {
+    /// 輸出模式
+    pub output_mode: ContactSheetOutputMode,
+}
+
+/// 影片轉檔設定
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VideoEncoderSettings {
+    /// 轉檔後處理動作
+    pub post_encode_action: PostEncodeAction,
+}
+
+/// 最近使用路徑的最大數量
+pub const MAX_RECENT_PATHS: usize = 10;
+
+/// 使用者設定
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserSettings {
+    /// 語言設定
     pub language: Language,
+    /// 影片轉檔設定
+    #[serde(default)]
+    pub video_encoder: VideoEncoderSettings,
+    /// 縮圖產生設定
+    #[serde(default)]
+    pub contact_sheet: ContactSheetSettings,
+    /// 最近使用的路徑（最多 10 個）
+    #[serde(default)]
+    pub recent_paths: Vec<String>,
 }
 
 /// 檔案類型分類

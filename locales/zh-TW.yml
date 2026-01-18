@@ -8,8 +8,35 @@ main_menu:
   opt_auto_move: "自動依類型整理檔案"
   opt_orphan: "移動孤立檔案（無對應檔案）"
   opt_renamer: "影片依時長排序重新命名"
-  opt_language: "切換語言 (Change Language)"
+  opt_settings: "設定"
   goodbye: "感謝使用，再見！"
   error_prefix: "錯誤:"
+
+settings:
+  title: "=== 設定 ==="
+  prompt: "請選擇設定項目"
+  opt_encoder: "影片轉檔設定"
+  opt_contact_sheet: "縮圖產生設定"
+  opt_language: "語言設定"
+  back: "返回主選單"
+  saved: "設定已儲存:"
+  encoder:
+    title: "=== 影片轉檔設定 ==="
+    prompt: "轉檔完成後的處理方式"
+    current: "目前設定:"
+    action_none: "不移動任何檔案"
+    action_move_old: "移動舊影片（原始檔案）到 finish 資料夾"
+    action_move_new: "移動新影片（轉檔後檔案）到 finish 資料夾"
+  contact_sheet:
+    title: "=== 縮圖產生設定 ==="
+    prompt: "縮圖輸出位置"
+    current: "目前設定:"
+    mode_sub_directory: "輸出到子目錄 (_contact_sheets)"
+    mode_same_directory: "輸出到影片同目錄（與影片同名）"
+  language:
+    title: "=== 語言設定 ==="
+    prompt: "請選擇語言"
+
 common:
   press_enter: "按 Enter 繼續..."
+  esc_hint: "(按 ESC 返回上一層)"

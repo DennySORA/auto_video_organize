@@ -1,17 +1,21 @@
+use super::batch_extractor::{BatchExtractorConfig, extract_thumbnails_batch};
 use super::contact_sheet_merger::{
     DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_THUMBNAIL_COUNT, create_contact_sheet,
 };
 use super::scene_detector::detect_scenes;
 use super::thumbnail_extractor::{create_thumbnail_tasks, extract_thumbnails_parallel};
 use super::timestamp_selector::select_timestamps;
-use crate::config::Config;
+use super::uniform_selector::select_uniform_timestamps;
+use crate::config::save::{add_recent_path, save_settings};
+use crate::config::{Config, ContactSheetOutputMode};
 use crate::tools::{
     VideoFileInfo, ensure_directory_exists, get_video_info, scan_video_files,
     validate_directory_exists,
 };
 use anyhow::{Context, Result};
 use console::style;
-use dialoguer::Input;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Input, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use rayon::prelude::*;
@@ -24,8 +28,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// 預覽圖預設輸出子目錄名稱
 const CONTACT_SHEET_OUTPUT_DIR: &str = "_contact_sheets";
 
-/// 處理階段數量（A-E 共 5 階段）
-const STAGE_COUNT: u64 = 5;
+/// 快速模式處理階段數量（A-C 共 3 階段）
+const FAST_STAGE_COUNT: u64 = 3;
+
+/// 精準模式處理階段數量（A-E 共 5 階段）
+const PRECISE_STAGE_COUNT: u64 = 5;
+
+/// 生成模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GenerationMode {
+    /// 快速模式：跳過場景偵測，使用均勻時間點分布
+    #[default]
+    Fast,
+    /// 精準模式：使用場景偵測選取代表時間點
+    Precise,
+}
 
 /// 產生唯一 ID（結合時間戳與執行緒 ID）
 fn generate_unique_id() -> String {
@@ -76,12 +93,21 @@ pub struct GenerationResult {
 
 /// 預覽圖生成器
 ///
+/// 提供兩種模式：
+///
+/// ## 快速模式（預設）
+/// 三階段流程：
+/// A. 取得影片資訊（ffprobe）
+/// B. 均勻選取時間點（無需解碼）
+/// C. 批次擷取縮圖並合併
+///
+/// ## 精準模式
 /// 五階段流程：
 /// A. 取得影片資訊（ffprobe）
 /// B. 場景變換偵測（scdet）
-/// C. 選取 54 個代表時間點
+/// C. 選取代表時間點
 /// D. 平行擷取縮圖
-/// E. 合併為 9x6 預覽圖
+/// E. 合併為預覽圖
 pub struct ContactSheetGenerator {
     config: Config,
     shutdown_signal: Arc<AtomicBool>,
@@ -98,16 +124,46 @@ impl ContactSheetGenerator {
     pub fn run(&self) -> Result<()> {
         println!("{}", style("=== 影片預覽圖生成 ===").cyan().bold());
 
+        // 選擇模式
+        let Some(mode) = self.prompt_mode()? else {
+            return Ok(()); // ESC pressed, return to main menu
+        };
+
         // 取得輸入路徑
-        let input_path = self.prompt_input_path()?;
+        let Some(input_path) = self.prompt_input_path()? else {
+            return Ok(()); // ESC pressed, return to main menu
+        };
         let input_dir = PathBuf::from(&input_path);
         validate_directory_exists(&input_dir)?;
 
-        // 輸出路徑固定為影片目錄下的子目錄
-        let output_dir = input_dir.join(CONTACT_SHEET_OUTPUT_DIR);
+        // 更新路徑歷史並儲存（使用局部變數避免修改 self）
+        {
+            let mut settings = self.config.settings.clone();
+            add_recent_path(&mut settings, &input_path);
+            if let Err(e) = save_settings(&settings) {
+                warn!("無法儲存路徑歷史: {e}");
+            }
+        }
+
+        // 根據設定決定輸出目錄
+        let output_mode = self.config.settings.contact_sheet.output_mode;
+        let output_dir = match output_mode {
+            ContactSheetOutputMode::SubDirectory => input_dir.join(CONTACT_SHEET_OUTPUT_DIR),
+            ContactSheetOutputMode::SameDirectory => input_dir.clone(),
+        };
         ensure_directory_exists(&output_dir)?;
 
-        println!("預覽圖將輸出至: {}", style(output_dir.display()).cyan());
+        match output_mode {
+            ContactSheetOutputMode::SubDirectory => {
+                println!("預覽圖將輸出至: {}", style(output_dir.display()).cyan());
+            }
+            ContactSheetOutputMode::SameDirectory => {
+                println!(
+                    "預覽圖將輸出至: {} (與影片同目錄)",
+                    style(output_dir.display()).cyan()
+                );
+            }
+        }
 
         // 掃描影片檔案
         println!("{}", style("掃描影片檔案中...").dim());
@@ -139,28 +195,97 @@ impl ContactSheetGenerator {
         }
 
         println!();
+
+        let mode_desc = match mode {
+            GenerationMode::Fast => "快速模式",
+            GenerationMode::Precise => "精準模式",
+        };
         println!(
             "{}",
             style(format!(
-                "開始平行生成預覽圖（使用 {} 個執行緒）...",
+                "開始生成預覽圖（{}，使用 {} 個執行緒）...",
+                mode_desc,
                 rayon::current_num_threads()
             ))
             .cyan()
         );
 
         // 平行處理所有影片
-        let result = self.process_videos_parallel(&video_files, &output_dir);
+        let result = self.process_videos_parallel(&video_files, &output_dir, mode);
 
         self.print_summary(&result);
 
         Ok(())
     }
 
-    fn prompt_input_path(&self) -> Result<String> {
-        let path: String = Input::new()
-            .with_prompt("請輸入影片資料夾路徑")
-            .interact_text()?;
-        Ok(path.trim().to_string())
+    fn prompt_mode(&self) -> Result<Option<GenerationMode>> {
+        println!("{}", style("(按 ESC 返回主選單)").dim());
+
+        let options = vec![
+            "快速模式（推薦）- 跳過場景偵測，速度快 3-5 倍",
+            "精準模式 - 使用場景偵測，更精確但較慢",
+        ];
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("請選擇生成模式")
+            .items(&options)
+            .default(0)
+            .interact_opt()?;
+
+        Ok(match selection {
+            Some(0) => Some(GenerationMode::Fast),
+            Some(1) => Some(GenerationMode::Precise),
+            None => None, // ESC pressed
+            _ => Some(GenerationMode::Fast),
+        })
+    }
+
+    fn prompt_input_path(&self) -> Result<Option<String>> {
+        let recent_paths = &self.config.settings.recent_paths;
+
+        // 如果沒有歷史路徑，直接輸入
+        if recent_paths.is_empty() {
+            let path: String = Input::new()
+                .with_prompt("請輸入影片資料夾路徑")
+                .interact_text()?;
+            return Ok(Some(path.trim().to_string()));
+        }
+
+        // 建立選項清單：歷史路徑 + 輸入新路徑
+        let mut options: Vec<String> = recent_paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                // 檢查路徑是否存在
+                let exists = Path::new(p).exists();
+                let indicator = if exists { "✓" } else { "✗" };
+                format!("{} [{}] {}", i + 1, indicator, p)
+            })
+            .collect();
+        options.push("輸入新路徑...".to_string());
+
+        println!("{}", style("(按 ESC 返回主選單)").dim());
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("請選擇路徑")
+            .items(&options)
+            .default(0)
+            .interact_opt()?;
+
+        match selection {
+            None => Ok(None), // ESC pressed
+            Some(idx) if idx < recent_paths.len() => {
+                // 選擇歷史路徑
+                Ok(Some(recent_paths[idx].clone()))
+            }
+            Some(_) => {
+                // 輸入新路徑
+                let path: String = Input::new()
+                    .with_prompt("請輸入影片資料夾路徑")
+                    .interact_text()?;
+                Ok(Some(path.trim().to_string()))
+            }
+        }
     }
 
     /// 平行處理所有影片，吃滿 CPU
@@ -168,6 +293,7 @@ impl ContactSheetGenerator {
         &self,
         videos: &[VideoFileInfo],
         output_dir: &Path,
+        mode: GenerationMode,
     ) -> GenerationResult {
         let successful = AtomicUsize::new(0);
         let failed = AtomicUsize::new(0);
@@ -192,6 +318,11 @@ impl ContactSheetGenerator {
         );
         separator.tick();
 
+        let stage_count = match mode {
+            GenerationMode::Fast => FAST_STAGE_COUNT,
+            GenerationMode::Precise => PRECISE_STAGE_COUNT,
+        };
+
         videos.par_iter().for_each(|video| {
             if self.shutdown_signal.load(Ordering::SeqCst) {
                 return;
@@ -203,7 +334,8 @@ impl ContactSheetGenerator {
             );
 
             // 檢查輸出檔案是否已存在
-            let output_path = output_dir.join(format!("{video_name}_contact_sheet.jpg"));
+            // 使用與影片相同的檔名（只改副檔名），以便孤立檔案比對能正確配對
+            let output_path = output_dir.join(format!("{video_name}.jpg"));
             if output_path.exists() {
                 info!("{video_name}: 預覽圖已存在，跳過");
                 skipped.fetch_add(1, Ordering::SeqCst);
@@ -213,12 +345,17 @@ impl ContactSheetGenerator {
             }
 
             // 為此影片建立進度條
-            let video_pb = multi_progress.add(ProgressBar::new(STAGE_COUNT));
+            let video_pb = multi_progress.add(ProgressBar::new(stage_count));
             video_pb.set_style(create_video_progress_style());
             video_pb.set_prefix(truncate_name(&video_name, 20));
             video_pb.enable_steady_tick(Duration::from_millis(80));
 
-            match self.process_single_video_with_progress(&video.path, &output_path, &video_pb) {
+            match self.process_single_video_with_progress(
+                &video.path,
+                &output_path,
+                &video_pb,
+                mode,
+            ) {
                 Ok(()) => {
                     video_pb.set_message("✓ 完成");
                     video_pb.finish();
@@ -260,6 +397,7 @@ impl ContactSheetGenerator {
         video_path: &Path,
         output_path: &Path,
         progress: &ProgressBar,
+        mode: GenerationMode,
     ) -> Result<()> {
         // 建立暫存目錄（使用唯一 ID 避免平行處理時衝突）
         let video_stem = video_path
@@ -274,8 +412,14 @@ impl ContactSheetGenerator {
 
         ensure_directory_exists(&temp_dir)?;
 
-        let result =
-            self.process_video_stages_with_progress(video_path, output_path, &temp_dir, progress);
+        let result = match mode {
+            GenerationMode::Fast => {
+                self.process_video_fast_mode(video_path, output_path, &temp_dir, progress)
+            }
+            GenerationMode::Precise => {
+                self.process_video_precise_mode(video_path, output_path, &temp_dir, progress)
+            }
+        };
 
         // 清理暫存目錄
         if temp_dir.exists() && fs::remove_dir_all(&temp_dir).is_err() {
@@ -283,6 +427,103 @@ impl ContactSheetGenerator {
         }
 
         result
+    }
+
+    /// 快速模式處理：跳過場景偵測
+    fn process_video_fast_mode(
+        &self,
+        video_path: &Path,
+        output_path: &Path,
+        temp_dir: &Path,
+        progress: &ProgressBar,
+    ) -> Result<()> {
+        let video_name = video_path.file_name().map_or_else(
+            || "unknown".to_string(),
+            |s| s.to_string_lossy().to_string(),
+        );
+
+        // Stage A: 取得影片資訊
+        progress.set_message("A: 讀取資訊");
+        debug!("{video_name}: 讀取影片資訊...");
+        let video_info = get_video_info(video_path)
+            .with_context(|| format!("無法讀取影片資訊: {}", video_path.display()))?;
+        debug!(
+            "{video_name}: {:.1}s, {}x{}",
+            video_info.duration_seconds, video_info.width, video_info.height
+        );
+        progress.inc(1);
+
+        // 檢查影片是否太短
+        if video_info.duration_seconds < 1.0 {
+            anyhow::bail!("影片太短（< 1 秒）");
+        }
+
+        // Stage B: 均勻選取時間點（快速）
+        progress.set_message("B: 選取時間點");
+        debug!("{video_name}: 均勻選取截圖時間點...");
+        let timestamps =
+            select_uniform_timestamps(video_info.duration_seconds, DEFAULT_THUMBNAIL_COUNT);
+        debug!("{video_name}: 選取 {} 個時間點", timestamps.len());
+        progress.inc(1);
+
+        if timestamps.len() < DEFAULT_THUMBNAIL_COUNT {
+            anyhow::bail!(
+                "無法選取足夠的時間點: 需要 {}，只有 {}",
+                DEFAULT_THUMBNAIL_COUNT,
+                timestamps.len()
+            );
+        }
+
+        // Stage C: 批次擷取縮圖並合併
+        progress.set_message("C: 擷取並合併");
+        debug!("{video_name}: 批次擷取縮圖...");
+
+        let config = BatchExtractorConfig::default();
+        let batch_result = extract_thumbnails_batch(
+            video_path,
+            &timestamps,
+            temp_dir,
+            &config,
+            &self.shutdown_signal,
+        )?;
+
+        debug!(
+            "{video_name}: 縮圖擷取完成 - 成功 {}, 失敗 {}",
+            batch_result.success_count, batch_result.failed_count
+        );
+
+        if batch_result.success_count < DEFAULT_THUMBNAIL_COUNT {
+            anyhow::bail!(
+                "縮圖擷取失敗: 需要 {DEFAULT_THUMBNAIL_COUNT} 張，只有 {} 張成功",
+                batch_result.success_count
+            );
+        }
+
+        // 合併預覽圖
+        debug!("{video_name}: 合併預覽圖...");
+        create_contact_sheet(
+            &batch_result.thumbnail_paths,
+            output_path,
+            DEFAULT_GRID_COLS,
+            DEFAULT_GRID_ROWS,
+        )
+        .with_context(|| "合併預覽圖失敗")?;
+        progress.inc(1);
+
+        debug!("{video_name}: 預覽圖生成完成");
+
+        Ok(())
+    }
+
+    /// 精準模式處理：使用場景偵測
+    fn process_video_precise_mode(
+        &self,
+        video_path: &Path,
+        output_path: &Path,
+        temp_dir: &Path,
+        progress: &ProgressBar,
+    ) -> Result<()> {
+        self.process_video_stages_with_progress(video_path, output_path, temp_dir, progress)
     }
 
     fn process_video_stages_with_progress(

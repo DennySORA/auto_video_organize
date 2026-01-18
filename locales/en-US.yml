@@ -8,8 +8,35 @@ main_menu:
   opt_auto_move: "Auto Move by File Type"
   opt_orphan: "Move Orphan Files"
   opt_renamer: "Rename Videos by Duration"
-  opt_language: "Change Language"
+  opt_settings: "Settings"
   goodbye: "Thank you for using, goodbye!"
   error_prefix: "Error:"
+
+settings:
+  title: "=== Settings ==="
+  prompt: "Please select a setting"
+  opt_encoder: "Video Encoder Settings"
+  opt_contact_sheet: "Contact Sheet Settings"
+  opt_language: "Language Settings"
+  back: "Back to Main Menu"
+  saved: "Setting saved:"
+  encoder:
+    title: "=== Video Encoder Settings ==="
+    prompt: "Action after encoding completes"
+    current: "Current setting:"
+    action_none: "Do not move any files"
+    action_move_old: "Move original video to finish folder"
+    action_move_new: "Move encoded video to finish folder"
+  contact_sheet:
+    title: "=== Contact Sheet Settings ==="
+    prompt: "Output location"
+    current: "Current setting:"
+    mode_sub_directory: "Output to subdirectory (_contact_sheets)"
+    mode_same_directory: "Output to same directory as video"
+  language:
+    title: "=== Language Settings ==="
+    prompt: "Please select a language"
+
 common:
   press_enter: "Press Enter to continue..."
+  esc_hint: "(Press ESC to go back)"

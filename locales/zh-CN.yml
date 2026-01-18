@@ -8,8 +8,35 @@ main_menu:
   opt_auto_move: "自动按类型整理文件"
   opt_orphan: "移动孤立文件（无对应文件）"
   opt_renamer: "视频按时长排序重命名"
-  opt_language: "切换语言 (Change Language)"
+  opt_settings: "设置"
   goodbye: "感谢使用，再见！"
   error_prefix: "错误:"
+
+settings:
+  title: "=== 设置 ==="
+  prompt: "请选择设置项目"
+  opt_encoder: "视频转码设置"
+  opt_contact_sheet: "缩略图生成设置"
+  opt_language: "语言设置"
+  back: "返回主菜单"
+  saved: "设置已保存:"
+  encoder:
+    title: "=== 视频转码设置 ==="
+    prompt: "转码完成后的处理方式"
+    current: "当前设置:"
+    action_none: "不移动任何文件"
+    action_move_old: "移动旧视频（原始文件）到 finish 文件夹"
+    action_move_new: "移动新视频（转码后文件）到 finish 文件夹"
+  contact_sheet:
+    title: "=== 缩略图生成设置 ==="
+    prompt: "缩略图输出位置"
+    current: "当前设置:"
+    mode_sub_directory: "输出到子目录 (_contact_sheets)"
+    mode_same_directory: "输出到视频同目录（与视频同名）"
+  language:
+    title: "=== 语言设置 ==="
+    prompt: "请选择语言"
+
 common:
   press_enter: "按 Enter 继续..."
+  esc_hint: "(按 ESC 返回上一层)"
