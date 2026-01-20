@@ -60,7 +60,7 @@ impl FfmpegCommand {
             "-map_metadata:s", "-1",
             "-map_chapters", "-1",
             "-avoid_negative_ts", "make_zero",
-            "-vf", "scale=round(iw*SAR/2)*2:round(ih/2)*2,setsar=1,format=yuv420p10le",
+            "-vf", "scale=round(iw*if(sar,sar,1)/2)*2:round(ih/2)*2,setsar=1,format=yuv420p10le",
             "-c:v", "libx265",
             "-profile:v", "main10",
             "-pix_fmt", "yuv420p10le",

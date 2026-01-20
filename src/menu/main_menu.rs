@@ -53,15 +53,15 @@ pub fn show_main_menu(
             Ok(true)
         }
         Some(3) => {
-            run_auto_move_by_type(term, shutdown_signal)?;
+            run_auto_move_by_type(term, shutdown_signal, config)?;
             Ok(true)
         }
         Some(4) => {
-            run_orphan_file_mover(term, shutdown_signal)?;
+            run_orphan_file_mover(term, shutdown_signal, config)?;
             Ok(true)
         }
         Some(5) => {
-            run_video_renamer(term, shutdown_signal)?;
+            run_video_renamer(term, shutdown_signal, config)?;
             Ok(true)
         }
         Some(6) => {

@@ -3,23 +3,30 @@
 //! 掃描資料夾，將沒有對應檔案（同名不同副檔名）的孤立檔案移動到指定目錄
 
 use super::file_grouper::{FileGroup, FileGrouper, OrphanMoveResult};
+use crate::config::Config;
+use crate::config::save::{add_recent_path, save_settings};
 use crate::tools::validate_directory_exists;
 use anyhow::Result;
 use console::style;
-use dialoguer::{Confirm, Input};
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Confirm, Input, Select};
 use log::{info, warn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 孤立檔案移動元件
 pub struct OrphanFileMover {
+    config: Config,
     shutdown_signal: Arc<AtomicBool>,
 }
 
 impl OrphanFileMover {
-    pub const fn new(shutdown_signal: Arc<AtomicBool>) -> Self {
-        Self { shutdown_signal }
+    pub const fn new(config: Config, shutdown_signal: Arc<AtomicBool>) -> Self {
+        Self {
+            config,
+            shutdown_signal,
+        }
     }
 
     pub fn run(&self) -> Result<()> {
@@ -29,10 +36,21 @@ impl OrphanFileMover {
         );
 
         // 取得輸入路徑
-        let input_path = self.prompt_input_path()?;
+        let Some(input_path) = self.prompt_input_path()? else {
+            return Ok(()); // ESC pressed
+        };
         let directory = PathBuf::from(&input_path);
 
         validate_directory_exists(&directory)?;
+
+        // 更新路徑歷史並儲存
+        {
+            let mut settings = self.config.settings.clone();
+            add_recent_path(&mut settings, &input_path);
+            if let Err(e) = save_settings(&settings) {
+                warn!("無法儲存路徑歷史: {e}");
+            }
+        }
 
         // 建立分組器
         let grouper = FileGrouper::new(Arc::clone(&self.shutdown_signal));
@@ -70,11 +88,47 @@ impl OrphanFileMover {
         Ok(())
     }
 
-    fn prompt_input_path(&self) -> Result<String> {
-        let path: String = Input::new()
-            .with_prompt("請輸入要處理的資料夾路徑")
-            .interact_text()?;
-        Ok(path.trim().to_string())
+    fn prompt_input_path(&self) -> Result<Option<String>> {
+        let recent_paths = &self.config.settings.recent_paths;
+
+        // 如果沒有歷史路徑，直接輸入
+        if recent_paths.is_empty() {
+            let path: String = Input::new()
+                .with_prompt("請輸入要處理的資料夾路徑")
+                .interact_text()?;
+            return Ok(Some(path.trim().to_string()));
+        }
+
+        // 建立選項清單：歷史路徑 + 輸入新路徑
+        let mut options: Vec<String> = recent_paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let exists = Path::new(p).exists();
+                let indicator = if exists { "✓" } else { "✗" };
+                format!("{} [{}] {}", i + 1, indicator, p)
+            })
+            .collect();
+        options.push("輸入新路徑...".to_string());
+
+        println!("{}", style("(按 ESC 返回主選單)").dim());
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("請選擇路徑")
+            .items(&options)
+            .default(0)
+            .interact_opt()?;
+
+        match selection {
+            None => Ok(None),
+            Some(idx) if idx < recent_paths.len() => Ok(Some(recent_paths[idx].clone())),
+            Some(_) => {
+                let path: String = Input::new()
+                    .with_prompt("請輸入要處理的資料夾路徑")
+                    .interact_text()?;
+                Ok(Some(path.trim().to_string()))
+            }
+        }
     }
 
     fn confirm_move(&self) -> Result<bool> {

@@ -55,9 +55,12 @@ pub fn run_contact_sheet_generator(
     Ok(())
 }
 
-pub fn run_auto_move_by_type(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let config = Config::new()?;
-    let mover = AutoMoveByType::new(config, Arc::clone(shutdown_signal));
+pub fn run_auto_move_by_type(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let mover = AutoMoveByType::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = mover.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);
@@ -67,8 +70,12 @@ pub fn run_auto_move_by_type(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> 
     Ok(())
 }
 
-pub fn run_orphan_file_mover(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let mover = OrphanFileMover::new(Arc::clone(shutdown_signal));
+pub fn run_orphan_file_mover(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let mover = OrphanFileMover::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = mover.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);
@@ -78,9 +85,12 @@ pub fn run_orphan_file_mover(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> 
     Ok(())
 }
 
-pub fn run_video_renamer(term: &Term, shutdown_signal: &Arc<AtomicBool>) -> Result<()> {
-    let config = Config::new()?;
-    let renamer = VideoRenamer::new(config, Arc::clone(shutdown_signal));
+pub fn run_video_renamer(
+    term: &Term,
+    shutdown_signal: &Arc<AtomicBool>,
+    config: &Config,
+) -> Result<()> {
+    let renamer = VideoRenamer::new(config.clone(), Arc::clone(shutdown_signal));
 
     if let Err(e) = renamer.run() {
         eprintln!("{} {}", style(t!("main_menu.error_prefix")).red().bold(), e);

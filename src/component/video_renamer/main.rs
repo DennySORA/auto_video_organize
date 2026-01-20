@@ -5,13 +5,16 @@
 use super::filename_cleaner::FilenameCleaner;
 use super::video_sorter::{VideoSorter, VideoWithDuration};
 use crate::config::Config;
+use crate::config::save::{add_recent_path, save_settings};
 use crate::tools::{scan_video_files, validate_directory_exists};
 use anyhow::Result;
 use console::style;
-use dialoguer::{Confirm, Input};
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Confirm, Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
+use log::warn;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
@@ -45,8 +48,21 @@ impl VideoRenamer {
     pub fn run(&self) -> Result<()> {
         println!("{}", style("=== 影片依時長排序重新命名 ===").cyan().bold());
 
-        let directory = self.prompt_directory()?;
+        let Some(input_path) = self.prompt_input_path()? else {
+            return Ok(()); // ESC pressed
+        };
+        let directory = PathBuf::from(&input_path);
+
         validate_directory_exists(&directory)?;
+
+        // 更新路徑歷史並儲存
+        {
+            let mut settings = self.config.settings.clone();
+            add_recent_path(&mut settings, &input_path);
+            if let Err(e) = save_settings(&settings) {
+                warn!("無法儲存路徑歷史: {e}");
+            }
+        }
 
         let start_index = self.prompt_start_index()?;
 
@@ -98,11 +114,47 @@ impl VideoRenamer {
         Ok(())
     }
 
-    fn prompt_directory(&self) -> Result<PathBuf> {
-        let path: String = Input::new()
-            .with_prompt("請輸入影片資料夾路徑")
-            .interact_text()?;
-        Ok(PathBuf::from(path.trim()))
+    fn prompt_input_path(&self) -> Result<Option<String>> {
+        let recent_paths = &self.config.settings.recent_paths;
+
+        // 如果沒有歷史路徑，直接輸入
+        if recent_paths.is_empty() {
+            let path: String = Input::new()
+                .with_prompt("請輸入影片資料夾路徑")
+                .interact_text()?;
+            return Ok(Some(path.trim().to_string()));
+        }
+
+        // 建立選項清單：歷史路徑 + 輸入新路徑
+        let mut options: Vec<String> = recent_paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let exists = Path::new(p).exists();
+                let indicator = if exists { "✓" } else { "✗" };
+                format!("{} [{}] {}", i + 1, indicator, p)
+            })
+            .collect();
+        options.push("輸入新路徑...".to_string());
+
+        println!("{}", style("(按 ESC 返回主選單)").dim());
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("請選擇路徑")
+            .items(&options)
+            .default(0)
+            .interact_opt()?;
+
+        match selection {
+            None => Ok(None),
+            Some(idx) if idx < recent_paths.len() => Ok(Some(recent_paths[idx].clone())),
+            Some(_) => {
+                let path: String = Input::new()
+                    .with_prompt("請輸入影片資料夾路徑")
+                    .interact_text()?;
+                Ok(Some(path.trim().to_string()))
+            }
+        }
     }
 
     fn prompt_start_index(&self) -> Result<usize> {
