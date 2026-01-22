@@ -186,15 +186,32 @@ impl TaskScheduler {
             }
         }
 
-        for (pid, success) in completed_pids {
+        for (pid, exit_success) in completed_pids {
             if let Some(mut process) = self.running_processes.remove(&pid) {
                 let task = &mut self.tasks[process.task_index];
 
-                if success {
+                // 檢查輸出檔案是否存在且有效（大於 1KB）
+                let output_valid = task.destination_path.exists()
+                    && fs::metadata(&task.destination_path)
+                        .map(|m| m.len() > 1024)
+                        .unwrap_or(false);
+
+                if exit_success {
                     task.status = TaskStatus::Completed;
                     info!("編碼完成 [{}]: {}", pid, task.destination_path.display());
 
-                    // 執行轉檔後處理
+                    if let Err(e) = self.handle_post_encode_action(process.task_index) {
+                        warn!("轉檔後處理失敗: {}", e);
+                    }
+                } else if output_valid {
+                    // FFmpeg 退出碼非零但輸出檔案有效，視為成功（來源檔可能有損壞的 frame）
+                    task.status = TaskStatus::Completed;
+                    warn!(
+                        "編碼完成但有警告 [{}]: {} (來源檔案可能有損壞的 frame)",
+                        pid,
+                        task.destination_path.display()
+                    );
+
                     if let Err(e) = self.handle_post_encode_action(process.task_index) {
                         warn!("轉檔後處理失敗: {}", e);
                     }
