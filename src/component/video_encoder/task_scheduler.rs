@@ -3,6 +3,7 @@ use super::ffmpeg_command::FfmpegCommand;
 use crate::config::PostEncodeAction;
 use crate::tools::{VideoFileInfo, ensure_directory_exists};
 use anyhow::{Context, Result};
+use console::Term;
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -64,6 +65,8 @@ pub struct TaskScheduler {
     tasks: Vec<EncodingTask>,
     running_processes: HashMap<u32, RunningProcess>,
     cpu_monitor: CpuMonitor,
+    term: Term,
+    last_render_lines: usize,
     shutdown_signal: Arc<AtomicBool>,
     fail_directory: PathBuf,
     finish_directory: PathBuf,
@@ -92,6 +95,8 @@ impl TaskScheduler {
             tasks,
             running_processes: HashMap::new(),
             cpu_monitor: CpuMonitor::default(),
+            term: Term::buffered_stdout(),
+            last_render_lines: 0,
             shutdown_signal,
             fail_directory,
             finish_directory,
@@ -458,7 +463,7 @@ impl TaskScheduler {
         Ok(())
     }
 
-    fn print_status(&self) {
+    fn print_status(&mut self) {
         let pending = self
             .tasks
             .iter()
@@ -476,14 +481,15 @@ impl TaskScheduler {
             .filter(|t| t.status == TaskStatus::Failed)
             .count();
 
-        println!(
-            "\r\x1b[K[狀態] 等待: {} | 執行中: {} | 完成: {} | 失敗: {} | CPU: {:.1}%",
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "[狀態] 等待: {} | 執行中: {} | 完成: {} | 失敗: {} | CPU: {:.1}%",
             pending,
             running,
             completed,
             failed,
             self.cpu_monitor.system.global_cpu_usage()
-        );
+        ));
 
         if !self.running_processes.is_empty() {
             let mut progresses: Vec<_> = self
@@ -514,12 +520,20 @@ impl TaskScheduler {
                     .map(|s| format!("{:.2}x", s))
                     .unwrap_or_else(|| "--".to_string());
 
-                println!(
+                lines.push(format!(
                     "      {} {} / {}  speed:{}  {}",
                     percent, cur, total, speed, prog.file_name
-                );
+                ));
             }
         }
+
+        // 清除上一輪並重新繪製，避免畫面跳動與殘影
+        let _ = self.term.clear_last_lines(self.last_render_lines);
+        for line in &lines {
+            let _ = self.term.write_line(line);
+        }
+        let _ = self.term.flush();
+        self.last_render_lines = lines.len();
     }
 
     #[must_use]
