@@ -70,6 +70,7 @@ pub struct TaskScheduler {
     current_parallel_limit: usize,
     max_parallel_limit: usize,
     last_scale_check: Instant,
+    scale_cooldown: Duration,
     shutdown_signal: Arc<AtomicBool>,
     fail_directory: PathBuf,
     finish_directory: PathBuf,
@@ -105,6 +106,7 @@ impl TaskScheduler {
             current_parallel_limit: initial_limit,
             max_parallel_limit: cpu_count,
             last_scale_check: Instant::now(),
+            scale_cooldown: Duration::from_secs(5),
             shutdown_signal,
             fail_directory,
             finish_directory,
@@ -185,7 +187,8 @@ impl TaskScheduler {
             if self.running_processes.len() >= self.current_parallel_limit {
                 break;
             }
-            if cpu_usage >= self.cpu_monitor.usage_threshold() {
+            // 88% 以上視為接近飽和，停止新增
+            if cpu_usage >= 88.0 {
                 break;
             }
             if let Some(task_index) = self.find_next_pending_task() {
@@ -252,18 +255,21 @@ impl TaskScheduler {
             return;
         }
         let now = Instant::now();
-        if now.duration_since(self.last_scale_check) < Duration::from_secs(5) {
+        if now.duration_since(self.last_scale_check) < self.scale_cooldown {
             return;
         }
 
-        // 低於 70% 視為仍有餘裕，再增加一條任務
-        if cpu_usage < 70.0 {
+        // 僅在已達當前上限且 CPU 低於 70% 時才放寬
+        if self.running_processes.len() >= self.current_parallel_limit && cpu_usage < 70.0 {
             self.current_parallel_limit += 1;
             self.last_scale_check = now;
             info!(
                 "CPU {:.1}% 低於 70%，提高平行上限到 {} (最大 {})",
                 cpu_usage, self.current_parallel_limit, self.max_parallel_limit
             );
+        } else {
+            // 未放寬也更新時間，避免每輪都嘗試
+            self.last_scale_check = now;
         }
     }
 
