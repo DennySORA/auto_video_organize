@@ -181,4 +181,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+# Project local config
+settings.json
+
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,intellij+all,rust,macos,windows
