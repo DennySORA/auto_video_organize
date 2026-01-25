@@ -13,6 +13,8 @@ use dialoguer::{Input, Select};
 use rust_i18n::t;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::thread;
+use std::time::Duration;
 
 pub fn show_main_menu(
     term: &Term,
@@ -111,27 +113,73 @@ fn show_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
 
 /// 影片轉檔設定選單
 fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
+    loop {
+        term.clear_screen()?;
+        println!("{}", style(t!("settings.encoder.title")).cyan().bold());
+        println!("{}", style(t!("common.esc_hint")).dim());
+        println!();
+        render_encoder_overview(config);
+        println!();
+
+        let back = t!("settings.back").to_string();
+        let options = vec!["檔案處理設定".to_string(), "轉檔數量設定".to_string(), back];
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("選擇設定分類")
+            .items(&options)
+            .default(0)
+            .interact_on_opt(term)?;
+
+        match selection {
+            Some(0) => show_encoder_file_settings(term, config)?,
+            Some(1) => show_encoder_parallel_settings(term, config)?,
+            Some(2) | None => break,
+            _ => unreachable!(),
+        }
+    }
+
+    Ok(())
+}
+
+fn format_initial_limit(settings: &VideoEncoderSettings) -> String {
+    match settings.initial_max_parallel {
+        Some(v) => v.to_string(),
+        None => "自動 (CPU 1/4)".to_string(),
+    }
+}
+
+fn format_max_limit(settings: &VideoEncoderSettings) -> String {
+    match settings.max_parallel {
+        Some(v) => v.to_string(),
+        None => "無限制".to_string(),
+    }
+}
+
+fn render_encoder_overview(config: &Config) {
+    let enc = &config.settings.video_encoder;
+    println!(
+        "{:<18} {}",
+        style("轉檔後處理").dim(),
+        enc.post_encode_action
+    );
+    println!(
+        "{:<18} {}",
+        style("初始最大數").dim(),
+        format_initial_limit(enc)
+    );
+    println!(
+        "{:<18} {}",
+        style("最大同時數").dim(),
+        format_max_limit(enc)
+    );
+}
+
+fn show_encoder_file_settings(term: &Term, config: &mut Config) -> Result<()> {
     term.clear_screen()?;
-
-    println!("{}", style(t!("settings.encoder.title")).cyan().bold());
+    println!("{}", style("檔案處理設定").cyan().bold());
     println!("{}", style(t!("common.esc_hint")).dim());
-
-    // 顯示當前設定
-    println!(
-        "\n{} {}",
-        style(t!("settings.encoder.current")).dim(),
-        config.settings.video_encoder.post_encode_action
-    );
-    println!(
-        "{} {}",
-        style("初始最大轉檔數:").dim(),
-        format_initial_limit(&config.settings.video_encoder)
-    );
-    println!(
-        "{} {}",
-        style("最大同時轉檔數:").dim(),
-        format_max_limit(&config.settings.video_encoder)
-    );
+    println!();
+    render_encoder_overview(config);
     println!();
 
     let actions = [
@@ -152,23 +200,33 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
         .unwrap_or(0);
 
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt(t!("settings.encoder.prompt"))
+        .with_prompt("選擇轉檔後處理")
         .items(&items)
         .default(default_index)
         .interact_on_opt(term)?;
 
-    // ESC pressed - return without saving
-    let Some(selection) = selection else {
-        return Ok(());
-    };
-
-    let selected_action = actions[selection];
-
-    if selected_action != config.settings.video_encoder.post_encode_action {
-        config.settings.video_encoder.post_encode_action = selected_action;
+    if let Some(idx) = selection {
+        let selected_action = actions[idx];
+        if selected_action != config.settings.video_encoder.post_encode_action {
+            config.settings.video_encoder.post_encode_action = selected_action;
+            save_settings(&config.settings)?;
+            println!("\n{}", style(t!("settings.saved")).green());
+            thread::sleep(Duration::from_secs(1));
+        }
     }
 
-    // 設定初始最大轉檔數（-1 = CPU 1/4）
+    Ok(())
+}
+
+fn show_encoder_parallel_settings(term: &Term, config: &mut Config) -> Result<()> {
+    term.clear_screen()?;
+    println!("{}", style("轉檔數量設定").cyan().bold());
+    println!("{}", style("左側為項目，右側為目前值").dim());
+    println!();
+    render_encoder_overview(config);
+    println!();
+
+    // 初始最大轉檔數
     let current_initial = config
         .settings
         .video_encoder
@@ -176,7 +234,7 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
         .map(|v| v as i64)
         .unwrap_or(-1);
     let initial_limit: i64 = Input::new()
-        .with_prompt("設定初始最大轉檔數（-1 為 CPU 1/4）")
+        .with_prompt("初始最大轉檔數（-1 = CPU 1/4）")
         .default(current_initial)
         .interact_text()?;
     config.settings.video_encoder.initial_max_parallel = if initial_limit <= 0 {
@@ -185,7 +243,7 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
         Some(initial_limit as usize)
     };
 
-    // 設定最大同時轉檔數（-1 = 無限制）
+    // 最大同時轉檔數
     let current_max = config
         .settings
         .video_encoder
@@ -193,7 +251,7 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
         .map(|v| v as i64)
         .unwrap_or(-1);
     let max_limit: i64 = Input::new()
-        .with_prompt("設定最大同時轉檔數（-1 為無限制）")
+        .with_prompt("最大同時轉檔數（-1 = 無限制）")
         .default(current_max)
         .interact_text()?;
     config.settings.video_encoder.max_parallel = if max_limit <= 0 {
@@ -204,23 +262,9 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
 
     save_settings(&config.settings)?;
     println!("\n{}", style(t!("settings.saved")).green());
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(1));
 
     Ok(())
-}
-
-fn format_initial_limit(settings: &VideoEncoderSettings) -> String {
-    match settings.initial_max_parallel {
-        Some(v) => v.to_string(),
-        None => "自動 (CPU 1/4)".to_string(),
-    }
-}
-
-fn format_max_limit(settings: &VideoEncoderSettings) -> String {
-    match settings.max_parallel {
-        Some(v) => v.to_string(),
-        None => "無限制".to_string(),
-    }
 }
 
 /// 縮圖產生設定選單
