@@ -37,6 +37,9 @@ impl FfmpegCommand {
         cmd.args([
             "-hide_banner",
             "-nostdin",
+            // 將進度輸出成 key=value 格式到 stdout，便於程式解析
+            "-progress", "pipe:1",
+            "-stats_period", "0.5",
             "-loglevel", "error",
             "-protocol_whitelist", "file,pipe,fd",
             "-max_streams", "8",

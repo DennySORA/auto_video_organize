@@ -1,4 +1,5 @@
 use crate::config::FileTypeTable;
+use crate::tools::get_video_info;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -7,6 +8,7 @@ use walkdir::WalkDir;
 pub struct VideoFileInfo {
     pub path: PathBuf,
     pub size: u64,
+    pub duration_ms: Option<u64>,
 }
 
 pub fn scan_video_files(
@@ -21,9 +23,14 @@ pub fn scan_video_files(
         .filter(|entry| file_type_table.is_video_file(entry.path()))
         .filter_map(|entry| {
             let metadata = entry.metadata().ok()?;
+            let duration_ms = get_video_info(entry.path())
+                .ok()
+                .map(|info| (info.duration_seconds * 1000.0).round() as u64);
+
             Some(VideoFileInfo {
                 path: entry.into_path(),
                 size: metadata.len(),
+                duration_ms,
             })
         })
         .collect();
@@ -42,14 +49,17 @@ mod tests {
             VideoFileInfo {
                 path: PathBuf::from("/a.mp4"),
                 size: 1000,
+                duration_ms: Some(10_000),
             },
             VideoFileInfo {
                 path: PathBuf::from("/b.mp4"),
                 size: 500,
+                duration_ms: Some(5_000),
             },
             VideoFileInfo {
                 path: PathBuf::from("/c.mp4"),
                 size: 2000,
+                duration_ms: Some(20_000),
             },
         ];
         files.sort_by_key(|f| f.size);

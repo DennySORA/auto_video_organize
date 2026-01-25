@@ -7,10 +7,10 @@ use log::{error, info, warn};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
-use std::sync::Arc;
+use std::process::{Child, ChildStdout, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{fs, thread};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +25,7 @@ pub enum TaskStatus {
 pub struct EncodingTask {
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
+    pub duration_ms: Option<u64>,
     pub status: TaskStatus,
     pub error_message: Option<String>,
 }
@@ -36,16 +37,27 @@ impl EncodingTask {
         Self {
             source_path: video_info.path.clone(),
             destination_path: ffmpeg_cmd.destination_path().to_path_buf(),
+            duration_ms: video_info.duration_ms,
             status: TaskStatus::Pending,
             error_message: None,
         }
     }
 }
 
+#[derive(Debug, Clone)]
+struct ProgressState {
+    file_name: String,
+    current_ms: u64,
+    total_ms: Option<u64>,
+    speed: Option<f64>,
+    last_update: Instant,
+}
+
 struct RunningProcess {
     child: Child,
     task_index: usize,
     destination_path: PathBuf,
+    progress: Arc<Mutex<ProgressState>>,
 }
 
 pub struct TaskScheduler {
@@ -87,6 +99,22 @@ impl TaskScheduler {
         })
     }
 
+    fn format_ms(ms: u64) -> String {
+        let secs = ms / 1000;
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        let s = secs % 60;
+        format!("{:02}:{:02}:{:02}", h, m, s)
+    }
+
+    fn parse_speed(raw: &str) -> Option<f64> {
+        if raw.ends_with('x') {
+            raw.trim_end_matches('x').parse::<f64>().ok()
+        } else {
+            raw.parse::<f64>().ok()
+        }
+    }
+
     pub fn run(&mut self) -> Result<()> {
         info!("開始編碼任務，共 {} 個檔案", self.tasks.len());
 
@@ -125,6 +153,47 @@ impl TaskScheduler {
         Ok(())
     }
 
+    /// 從 ffmpeg 標準輸出讀取進度資訊
+    fn spawn_progress_reader(stdout: Option<ChildStdout>, progress: Arc<Mutex<ProgressState>>) {
+        if stdout.is_none() {
+            return;
+        }
+
+        let mut reader = BufReader::new(stdout.unwrap());
+        thread::spawn(move || {
+            let mut line = String::new();
+            while let Ok(bytes) = reader.read_line(&mut line) {
+                if bytes == 0 {
+                    break;
+                }
+
+                let content = line.trim();
+                if let Some((key, value)) = content.split_once('=') {
+                    let mut guard = progress.lock().ok();
+                    if let Some(state) = guard.as_mut() {
+                        match key {
+                            "out_time_ms" => {
+                                if let Ok(v) = value.parse::<u64>() {
+                                    state.current_ms = v;
+                                    state.last_update = Instant::now();
+                                }
+                            }
+                            "speed" => {
+                                if let Some(speed_val) = Self::parse_speed(value) {
+                                    state.speed = Some(speed_val);
+                                    state.last_update = Instant::now();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                line.clear();
+            }
+        });
+    }
+
     fn find_next_pending_task(&self) -> Option<usize> {
         self.tasks
             .iter()
@@ -140,7 +209,7 @@ impl TaskScheduler {
         command.stderr(Stdio::piped());
 
         match command.spawn() {
-            Ok(child) => {
+            Ok(mut child) => {
                 let pid = child.id();
                 task.status = TaskStatus::Running;
 
@@ -151,12 +220,28 @@ impl TaskScheduler {
                     task.destination_path.display()
                 );
 
+                let progress = Arc::new(Mutex::new(ProgressState {
+                    file_name: task
+                        .source_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    current_ms: 0,
+                    total_ms: task.duration_ms,
+                    speed: None,
+                    last_update: Instant::now(),
+                }));
+
+                Self::spawn_progress_reader(child.stdout.take(), Arc::clone(&progress));
+
                 self.running_processes.insert(
                     pid,
                     RunningProcess {
                         child,
                         task_index,
                         destination_path: task.destination_path.clone(),
+                        progress,
                     },
                 );
             }
@@ -377,6 +462,39 @@ impl TaskScheduler {
             failed,
             self.cpu_monitor.system.global_cpu_usage()
         );
+
+        if !self.running_processes.is_empty() {
+            let mut progresses: Vec<_> = self
+                .running_processes
+                .values()
+                .filter_map(|p| p.progress.lock().ok().map(|state| state.clone()))
+                .collect();
+
+            progresses.sort_by(|a, b| b.current_ms.cmp(&a.current_ms));
+
+            for prog in progresses.iter().take(8) {
+                let percent = prog
+                    .total_ms
+                    .map(|total| (prog.current_ms as f64 / total as f64 * 100.0).min(100.0))
+                    .map(|p| format!("{:5.1}%", p))
+                    .unwrap_or_else(|| "  ?.?%".to_string());
+
+                let cur = Self::format_ms(prog.current_ms);
+                let total = prog
+                    .total_ms
+                    .map(Self::format_ms)
+                    .unwrap_or_else(|| "??:??:??".to_string());
+                let speed = prog
+                    .speed
+                    .map(|s| format!("{:.2}x", s))
+                    .unwrap_or_else(|| "--".to_string());
+
+                println!(
+                    "      {} {} / {}  速率:{}  {}",
+                    percent, cur, total, speed, prog.file_name
+                );
+            }
+        }
     }
 
     #[must_use]
