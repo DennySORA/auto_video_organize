@@ -95,7 +95,8 @@ impl TaskScheduler {
 
         let tasks = video_files.iter().map(EncodingTask::new).collect();
         let cpu_count = std::cmp::max(1, sysinfo::System::new_all().cpus().len());
-        let initial_limit = std::cmp::max(1, cpu_count / 2);
+        // 起始平行上限：CPU 核心數的 1/4，至少 1 條
+        let initial_limit = std::cmp::max(1, cpu_count / 4);
 
         Ok(Self {
             tasks,
