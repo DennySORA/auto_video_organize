@@ -97,6 +97,21 @@ pub struct ContactSheetSettings {
 pub struct VideoEncoderSettings {
     /// 轉檔後處理動作
     pub post_encode_action: PostEncodeAction,
+    /// 初始最大轉檔數（None = CPU 1/4）
+    #[serde(default = "VideoEncoderSettings::default_initial_limit")]
+    pub initial_max_parallel: Option<usize>,
+    /// 最大同時轉檔數（None = 無上限）
+    #[serde(default = "VideoEncoderSettings::default_max_parallel")]
+    pub max_parallel: Option<usize>,
+}
+
+impl VideoEncoderSettings {
+    const fn default_initial_limit() -> Option<usize> {
+        None
+    }
+    const fn default_max_parallel() -> Option<usize> {
+        None
+    }
 }
 
 /// 最近使用路徑的最大數量

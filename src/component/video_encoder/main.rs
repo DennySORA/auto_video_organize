@@ -72,9 +72,16 @@ impl VideoEncoder {
 
         println!();
         // 顯示轉檔後處理設定
-        let post_action = self.config.settings.video_encoder.post_encode_action;
-        if post_action != crate::config::PostEncodeAction::None {
-            println!("{}", style(format!("轉檔後處理: {post_action}")).dim());
+        let encoder_settings = &self.config.settings.video_encoder;
+        if encoder_settings.post_encode_action != crate::config::PostEncodeAction::None {
+            println!(
+                "{}",
+                style(format!(
+                    "轉檔後處理: {}",
+                    encoder_settings.post_encode_action
+                ))
+                .dim()
+            );
         }
 
         println!("{}", style("開始編碼任務...").cyan());
@@ -83,7 +90,7 @@ impl VideoEncoder {
             video_files,
             &directory,
             Arc::clone(&self.shutdown_signal),
-            post_action,
+            encoder_settings,
         )?;
 
         if let Err(e) = scheduler.run() {
