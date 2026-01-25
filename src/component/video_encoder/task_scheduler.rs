@@ -1,6 +1,6 @@
 use super::cpu_monitor::CpuMonitor;
 use super::ffmpeg_command::FfmpegCommand;
-use crate::config::PostEncodeAction;
+use crate::config::{PostEncodeAction, VideoEncoderSettings};
 use crate::tools::{VideoFileInfo, ensure_directory_exists};
 use anyhow::{Context, Result};
 use console::Term;
@@ -68,7 +68,7 @@ pub struct TaskScheduler {
     term: Term,
     last_render_lines: usize,
     current_parallel_limit: usize,
-    max_parallel_limit: usize,
+    max_parallel_limit: Option<usize>,
     last_scale_check: Instant,
     scale_cooldown: Duration,
     shutdown_signal: Arc<AtomicBool>,
@@ -82,21 +82,31 @@ impl TaskScheduler {
         video_files: Vec<VideoFileInfo>,
         base_directory: &Path,
         shutdown_signal: Arc<AtomicBool>,
-        post_encode_action: PostEncodeAction,
+        encoder_settings: &VideoEncoderSettings,
     ) -> Result<Self> {
         let fail_directory = base_directory.join("fail");
         let finish_directory = base_directory.join("finish");
         ensure_directory_exists(&fail_directory)?;
 
         // 只有在需要時才建立 finish 目錄
-        if post_encode_action != PostEncodeAction::None {
+        if encoder_settings.post_encode_action != PostEncodeAction::None {
             ensure_directory_exists(&finish_directory)?;
         }
 
-        let tasks = video_files.iter().map(EncodingTask::new).collect();
         let cpu_count = std::cmp::max(1, sysinfo::System::new_all().cpus().len());
-        // 起始平行上限：CPU 核心數的 1/4，至少 1 條
-        let initial_limit = std::cmp::max(1, cpu_count / 4);
+        // 起始平行上限：設定值或 CPU 核心數的 1/4，至少 1 條
+        let mut initial_limit = encoder_settings
+            .initial_max_parallel
+            .unwrap_or_else(|| std::cmp::max(1, cpu_count / 4));
+
+        let max_parallel_limit = encoder_settings.max_parallel;
+        if let Some(maxp) = max_parallel_limit {
+            if initial_limit > maxp {
+                initial_limit = maxp.max(1);
+            }
+        }
+
+        let tasks = video_files.iter().map(EncodingTask::new).collect();
 
         Ok(Self {
             tasks,
@@ -105,13 +115,13 @@ impl TaskScheduler {
             term: Term::buffered_stdout(),
             last_render_lines: 0,
             current_parallel_limit: initial_limit,
-            max_parallel_limit: cpu_count,
+            max_parallel_limit,
             last_scale_check: Instant::now(),
             scale_cooldown: Duration::from_secs(5),
             shutdown_signal,
             fail_directory,
             finish_directory,
-            post_encode_action,
+            post_encode_action: encoder_settings.post_encode_action,
         })
     }
 
@@ -121,6 +131,12 @@ impl TaskScheduler {
         let m = (secs % 3600) / 60;
         let s = secs % 60;
         format!("{:02}:{:02}:{:02}", h, m, s)
+    }
+
+    fn format_limit(limit: Option<usize>) -> String {
+        limit
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "∞".to_string())
     }
 
     fn parse_out_time_ms(raw: &str) -> Option<u64> {
@@ -188,6 +204,11 @@ impl TaskScheduler {
             if self.running_processes.len() >= self.current_parallel_limit {
                 break;
             }
+            if let Some(maxp) = self.max_parallel_limit {
+                if self.running_processes.len() >= maxp {
+                    break;
+                }
+            }
             // 88% 以上視為接近飽和，停止新增
             if cpu_usage >= 88.0 {
                 break;
@@ -252,8 +273,10 @@ impl TaskScheduler {
 
     /// 根據 CPU 使用率逐步放寬平行上限，避免一次開太多導致抖動。
     fn scale_up_if_possible(&mut self, cpu_usage: f32) {
-        if self.current_parallel_limit >= self.max_parallel_limit {
-            return;
+        if let Some(maxp) = self.max_parallel_limit {
+            if self.current_parallel_limit >= maxp {
+                return;
+            }
         }
         let now = Instant::now();
         if now.duration_since(self.last_scale_check) < self.scale_cooldown {
@@ -263,10 +286,17 @@ impl TaskScheduler {
         // 僅在已達當前上限且 CPU 低於 70% 時才放寬
         if self.running_processes.len() >= self.current_parallel_limit && cpu_usage < 70.0 {
             self.current_parallel_limit += 1;
+            if let Some(maxp) = self.max_parallel_limit {
+                if self.current_parallel_limit > maxp {
+                    self.current_parallel_limit = maxp;
+                }
+            }
             self.last_scale_check = now;
             info!(
                 "CPU {:.1}% 低於 70%，提高平行上限到 {} (最大 {})",
-                cpu_usage, self.current_parallel_limit, self.max_parallel_limit
+                cpu_usage,
+                self.current_parallel_limit,
+                Self::format_limit(self.max_parallel_limit)
             );
         } else {
             // 未放寬也更新時間，避免每輪都嘗試

@@ -1,13 +1,15 @@
 use crate::config::save::save_settings;
-use crate::config::types::{Config, ContactSheetOutputMode, Language, PostEncodeAction};
+use crate::config::types::{
+    Config, ContactSheetOutputMode, Language, PostEncodeAction, VideoEncoderSettings,
+};
 use crate::menu::handlers::{
     run_auto_move_by_type, run_contact_sheet_generator, run_duplication_checker,
     run_orphan_file_mover, run_video_encoder, run_video_renamer,
 };
 use anyhow::Result;
 use console::{Term, style};
-use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Input, Select};
 use rust_i18n::t;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -120,6 +122,16 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
         style(t!("settings.encoder.current")).dim(),
         config.settings.video_encoder.post_encode_action
     );
+    println!(
+        "{} {}",
+        style("初始最大轉檔數:").dim(),
+        format_initial_limit(&config.settings.video_encoder)
+    );
+    println!(
+        "{} {}",
+        style("最大同時轉檔數:").dim(),
+        format_max_limit(&config.settings.video_encoder)
+    );
     println!();
 
     let actions = [
@@ -154,16 +166,61 @@ fn show_encoder_settings_menu(term: &Term, config: &mut Config) -> Result<()> {
 
     if selected_action != config.settings.video_encoder.post_encode_action {
         config.settings.video_encoder.post_encode_action = selected_action;
-        save_settings(&config.settings)?;
-        println!(
-            "\n{} {}",
-            style(t!("settings.saved")).green(),
-            selected_action
-        );
-        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
+    // 設定初始最大轉檔數（-1 = CPU 1/4）
+    let current_initial = config
+        .settings
+        .video_encoder
+        .initial_max_parallel
+        .map(|v| v as i64)
+        .unwrap_or(-1);
+    let initial_limit: i64 = Input::new()
+        .with_prompt("設定初始最大轉檔數（-1 為 CPU 1/4）")
+        .default(current_initial)
+        .interact_text()?;
+    config.settings.video_encoder.initial_max_parallel = if initial_limit <= 0 {
+        None
+    } else {
+        Some(initial_limit as usize)
+    };
+
+    // 設定最大同時轉檔數（-1 = 無限制）
+    let current_max = config
+        .settings
+        .video_encoder
+        .max_parallel
+        .map(|v| v as i64)
+        .unwrap_or(-1);
+    let max_limit: i64 = Input::new()
+        .with_prompt("設定最大同時轉檔數（-1 為無限制）")
+        .default(current_max)
+        .interact_text()?;
+    config.settings.video_encoder.max_parallel = if max_limit <= 0 {
+        None
+    } else {
+        Some(max_limit as usize)
+    };
+
+    save_settings(&config.settings)?;
+    println!("\n{}", style(t!("settings.saved")).green());
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
     Ok(())
+}
+
+fn format_initial_limit(settings: &VideoEncoderSettings) -> String {
+    match settings.initial_max_parallel {
+        Some(v) => v.to_string(),
+        None => "自動 (CPU 1/4)".to_string(),
+    }
+}
+
+fn format_max_limit(settings: &VideoEncoderSettings) -> String {
+    match settings.max_parallel {
+        Some(v) => v.to_string(),
+        None => "無限制".to_string(),
+    }
 }
 
 /// 縮圖產生設定選單
