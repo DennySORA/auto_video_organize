@@ -29,6 +29,10 @@ impl CpuMonitor {
         self.system.global_cpu_usage()
     }
 
+    pub fn usage_threshold(&self) -> f32 {
+        self.usage_threshold
+    }
+
     pub fn can_spawn_new_task(&mut self) -> bool {
         self.current_usage() < self.usage_threshold
     }

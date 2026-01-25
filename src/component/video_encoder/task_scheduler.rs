@@ -67,6 +67,9 @@ pub struct TaskScheduler {
     cpu_monitor: CpuMonitor,
     term: Term,
     last_render_lines: usize,
+    current_parallel_limit: usize,
+    max_parallel_limit: usize,
+    last_scale_check: Instant,
     shutdown_signal: Arc<AtomicBool>,
     fail_directory: PathBuf,
     finish_directory: PathBuf,
@@ -90,6 +93,8 @@ impl TaskScheduler {
         }
 
         let tasks = video_files.iter().map(EncodingTask::new).collect();
+        let cpu_count = std::cmp::max(1, sysinfo::System::new_all().cpus().len());
+        let initial_limit = std::cmp::max(1, cpu_count / 2);
 
         Ok(Self {
             tasks,
@@ -97,6 +102,9 @@ impl TaskScheduler {
             cpu_monitor: CpuMonitor::default(),
             term: Term::buffered_stdout(),
             last_render_lines: 0,
+            current_parallel_limit: initial_limit,
+            max_parallel_limit: cpu_count,
+            last_scale_check: Instant::now(),
             shutdown_signal,
             fail_directory,
             finish_directory,
@@ -151,8 +159,11 @@ impl TaskScheduler {
                 return Ok(());
             }
 
+            let cpu_usage = self.cpu_monitor.current_usage();
+            self.scale_up_if_possible(cpu_usage);
+
             self.check_completed_processes()?;
-            self.spawn_new_tasks_if_possible()?;
+            self.spawn_new_tasks_if_possible(cpu_usage)?;
             self.print_status();
 
             thread::sleep(Duration::from_secs(1));
@@ -169,10 +180,18 @@ impl TaskScheduler {
             && self.running_processes.is_empty()
     }
 
-    fn spawn_new_tasks_if_possible(&mut self) -> Result<()> {
-        while self.cpu_monitor.can_spawn_new_task() {
+    fn spawn_new_tasks_if_possible(&mut self, mut cpu_usage: f32) -> Result<()> {
+        loop {
+            if self.running_processes.len() >= self.current_parallel_limit {
+                break;
+            }
+            if cpu_usage >= self.cpu_monitor.usage_threshold() {
+                break;
+            }
             if let Some(task_index) = self.find_next_pending_task() {
                 self.spawn_task(task_index)?;
+                // 更新 CPU 使用率再決定是否繼續新增
+                cpu_usage = self.cpu_monitor.current_usage();
             } else {
                 break;
             }
@@ -225,6 +244,27 @@ impl TaskScheduler {
         self.tasks
             .iter()
             .position(|t| t.status == TaskStatus::Pending)
+    }
+
+    /// 根據 CPU 使用率逐步放寬平行上限，避免一次開太多導致抖動。
+    fn scale_up_if_possible(&mut self, cpu_usage: f32) {
+        if self.current_parallel_limit >= self.max_parallel_limit {
+            return;
+        }
+        let now = Instant::now();
+        if now.duration_since(self.last_scale_check) < Duration::from_secs(5) {
+            return;
+        }
+
+        // 低於 70% 視為仍有餘裕，再增加一條任務
+        if cpu_usage < 70.0 {
+            self.current_parallel_limit += 1;
+            self.last_scale_check = now;
+            info!(
+                "CPU {:.1}% 低於 70%，提高平行上限到 {} (最大 {})",
+                cpu_usage, self.current_parallel_limit, self.max_parallel_limit
+            );
+        }
     }
 
     fn spawn_task(&mut self, task_index: usize) -> Result<()> {
