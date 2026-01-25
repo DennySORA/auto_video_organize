@@ -154,7 +154,7 @@ impl AutoMoveByType {
 
         // 按檔案數量排序
         let mut sorted_counts: Vec<_> = counts.into_iter().collect();
-        sorted_counts.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        sorted_counts.sort_by_key(|b| std::cmp::Reverse(b.1.0));
 
         for (category, (count, size)) in sorted_counts {
             let size_mb = size as f64 / 1024.0 / 1024.0;

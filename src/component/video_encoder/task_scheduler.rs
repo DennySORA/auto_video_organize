@@ -545,7 +545,7 @@ impl TaskScheduler {
                 .filter_map(|p| p.progress.lock().ok().map(|state| state.clone()))
                 .collect();
 
-            progresses.sort_by(|a, b| b.current_ms.cmp(&a.current_ms));
+            progresses.sort_by_key(|b| std::cmp::Reverse(b.current_ms));
 
             for prog in progresses.iter().take(8) {
                 let percent = prog
