@@ -107,6 +107,28 @@ impl TaskScheduler {
         format!("{:02}:{:02}:{:02}", h, m, s)
     }
 
+    fn parse_out_time_ms(raw: &str) -> Option<u64> {
+        if let Ok(us) = raw.parse::<u64>() {
+            return Some(us / 1000); // ffmpeg out_time_ms 單位為微秒
+        }
+
+        // 後備：解析 out_time=HH:MM:SS.micro
+        let parts: Vec<&str> = raw.split(':').collect();
+        if parts.len() == 3 {
+            let h = parts[0].parse::<u64>().ok()?;
+            let m = parts[1].parse::<u64>().ok()?;
+            let s_part = parts[2];
+            let (s, frac) = if let Some((sec, micro)) = s_part.split_once('.') {
+                (sec.parse::<u64>().ok()?, micro.parse::<u64>().unwrap_or(0))
+            } else {
+                (s_part.parse::<u64>().ok()?, 0)
+            };
+            let total_ms = ((h * 3600 + m * 60 + s) * 1000) + (frac / 1000);
+            return Some(total_ms);
+        }
+        None
+    }
+
     fn parse_speed(raw: &str) -> Option<f64> {
         if raw.ends_with('x') {
             raw.trim_end_matches('x').parse::<f64>().ok()
@@ -173,7 +195,7 @@ impl TaskScheduler {
                     if let Some(state) = guard.as_mut() {
                         match key {
                             "out_time_ms" => {
-                                if let Ok(v) = value.parse::<u64>() {
+                                if let Some(v) = Self::parse_out_time_ms(value) {
                                     state.current_ms = v;
                                     state.last_update = Instant::now();
                                 }
@@ -475,7 +497,10 @@ impl TaskScheduler {
             for prog in progresses.iter().take(8) {
                 let percent = prog
                     .total_ms
-                    .map(|total| (prog.current_ms as f64 / total as f64 * 100.0).min(100.0))
+                    .map(|total| {
+                        let cur = prog.current_ms.min(total);
+                        (cur as f64 / total as f64 * 100.0).min(100.0)
+                    })
                     .map(|p| format!("{:5.1}%", p))
                     .unwrap_or_else(|| "  ?.?%".to_string());
 
@@ -490,7 +515,7 @@ impl TaskScheduler {
                     .unwrap_or_else(|| "--".to_string());
 
                 println!(
-                    "      {} {} / {}  速率:{}  {}",
+                    "      {} {} / {}  speed:{}  {}",
                     percent, cur, total, speed, prog.file_name
                 );
             }
